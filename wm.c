@@ -52,7 +52,7 @@ static void showProblems(const wchar_t* text)
 static void setDpiAwareness(void)
 {
 	typedef BOOL (WINAPI *SetContextFn)(HANDLE);
-	SetContextFn setContext = (SetContextFn)GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetProcessDpiAwarenessContext");
+	SetContextFn setContext = (SetContextFn)(void*)GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetProcessDpiAwarenessContext");
 
 	if (!setContext || !setContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) {
 		SetProcessDPIAware();
@@ -222,7 +222,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR commandLine, i
 	configLoad(&config, problems, 2048);
 
 	wchar_t desktopProblem[512];
-	vdInit(desktopProblem, 512);
+	vdInit(config.desktopBackend, desktopProblem, 512);
 	lastDesktop = vdCurrent();
 
 	tilingInit(&config);

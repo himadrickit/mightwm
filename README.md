@@ -27,12 +27,22 @@ nmake                              (MSVC x64 Native Tools prompt)  -> release\li
 mingw32-make -f Makefile.mingw     (MinGW-w64)                     -> build\lightwm.exe
 ```
 
-## Workspaces need one extra file
+## Workspaces (Windows 10 and 11)
 
-Windows has no public API to switch virtual desktops or move windows between them. Put
-[VirtualDesktopAccessor.dll](https://github.com/Ciantic/VirtualDesktopAccessor) (v2.x, 64-bit) next to
-`lightwm.exe`. It wraps the undocumented interfaces and tracks them across Windows builds. Without it
-everything except `goto`/`send`/`workspace-*` works, and LightWM tells you at startup.
+Windows has no public API to switch virtual desktops, create them, or move other programs' windows,
+so LightWM talks to the same undocumented shell interfaces everyone else uses. Two backends, tried in order
+(`backend "auto"`):
+
+1. **`VirtualDesktopAccessor.dll`** next to `lightwm.exe`: a maintained wrapper that tracks those
+   interfaces across Windows builds. This is the most reliable option. Get the 64-bit 2.x build from
+   <https://github.com/Ciantic/VirtualDesktopAccessor/releases>.
+2. **Built-in client** (no extra file): Windows 10 1809+ and Windows 11 (21H2, 22H2/23H2, 24H2/25H2).
+   It offers the shell a list of known interface IDs and only uses one the shell accepts. If your
+   build isn't recognised you get a message with the build number; use the DLL instead.
+
+Windows' own `ctrl+win+d` and `ctrl+win+left/right` are switched off while LightWM controls the
+desktops (`block-windows-shortcuts true`), so `alt+1..9` is the one way to move around. They stay
+untouched if neither backend could start, so you can never lock yourself out of desktop switching.
 
 ## Config
 
@@ -42,7 +52,7 @@ written on first run. Reload with `$mod+shift+r`.
 ```kdl
 vars { mod "alt"; term "wt.exe" }
 general { gap 6; master-width 50; layout "master-stack"; float "Calculator" "mpv.exe" }
-workspaces { follow-focus true; goto "$mod+{1-9}"; send "$mod+shift+{1-9}" }
+workspaces { follow-focus true; block-windows-shortcuts true; backend "auto"; goto "$mod+{1-9}"; send "$mod+shift+{1-9}" }
 altdrag { enabled true; mod "$mod"; move "left"; resize "right" }
 binds {
     $mod+Return { spawn "$term" }

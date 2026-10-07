@@ -32,6 +32,8 @@ typedef struct {
 	LayoutKind layout;
 	bool warpCursor;
 	bool followFocus;
+	bool blockWindowsDesktopKeys;
+	int desktopBackend;
 
 	bool altdragEnabled;
 	UINT altdragMods;

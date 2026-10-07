@@ -1,0 +1,11 @@
+*.obj
+*.pdb
+*.lib
+*.exp
+*.ilk
+tests/test_layout
+tests/test_kdl
+tags
+debug
+release
+build

@@ -27,6 +27,8 @@ static const char* const defaultConfig =
 "\n"
 "workspaces {\n"
 "    follow-focus true      // focusing a window on another desktop switches to it\n"
+"    block-windows-shortcuts true  // turn off Windows' own ctrl+win+d / ctrl+win+left/right\n"
+"    backend \"auto\"        // \"auto\" (DLL if present, else built-in), \"dll\" or \"builtin\"\n"
 "    goto \"$mod+{1-9}\"\n"
 "    send \"$mod+shift+{1-9}\"\n"
 "}\n"
@@ -461,6 +463,13 @@ static void parseWorkspaces(Ctx* ctx, const KdlNode* node)
 
 		if (!strcmp(n->name, "follow-focus")) {
 			ctx->cfg->followFocus = truthy(value);
+		} else if (!strcmp(n->name, "block-windows-shortcuts")) {
+			ctx->cfg->blockWindowsDesktopKeys = truthy(value);
+		} else if (!strcmp(n->name, "backend") && value) {
+			if (!_stricmp(value, "auto")) ctx->cfg->desktopBackend = 0;
+			else if (!_stricmp(value, "dll")) ctx->cfg->desktopBackend = 1;
+			else if (!_stricmp(value, "builtin")) ctx->cfg->desktopBackend = 2;
+			else note(ctx, "workspaces: backend must be \"auto\", \"dll\" or \"builtin\"");
 		} else if (!strcmp(n->name, "goto") && value) {
 			addRangeBindings(ctx, value, ACT_GOTO);
 		} else if (!strcmp(n->name, "send") && value) {
@@ -555,6 +564,8 @@ static void setDefaults(Config* cfg)
 	cfg->masterPercent = 50;
 	cfg->layout = LAYOUT_MASTER_STACK;
 	cfg->followFocus = true;
+	cfg->blockWindowsDesktopKeys = true;
+	cfg->desktopBackend = 0;
 	cfg->altdragEnabled = true;
 	cfg->altdragMods = MOD_ALT;
 	cfg->altdragMoveButton = BTN_LEFT;

@@ -1,6 +1,7 @@
 #include "altdrag.h"
 #include "keyboard.h"
 #include "tiling.h"
+#include "vdesktop.h"
 #include <dwmapi.h>
 
 #ifndef DWMWA_EXTENDED_FRAME_BOUNDS
@@ -111,6 +112,16 @@ static LRESULT CALLBACK keyboardProc(int code, WPARAM wparam, LPARAM lparam)
 						swallowedTick[key->vkCode] = now;
 						PostThreadMessageW(ownerThread, WM_LWM_ACTION, (WPARAM)id, 0);
 						if (modsDown & (MOD_ALT | MOD_WIN)) disguiseModRelease = true;
+						return 1;
+					}
+
+					// Windows' own desktop shortcuts (ctrl+win+d, ctrl+win+left/right) are turned off
+					// once LightWM can drive the desktops itself; alt+1..9 replaces them.
+					if (config->blockWindowsDesktopKeys && vdCanControl() && modsDown == (MOD_CONTROL | MOD_WIN) &&
+						(key->vkCode == 'D' || key->vkCode == VK_LEFT || key->vkCode == VK_RIGHT)) {
+						swallowedKeys[key->vkCode] = true;
+						swallowedTick[key->vkCode] = now;
+						disguiseModRelease = true;
 						return 1;
 					}
 

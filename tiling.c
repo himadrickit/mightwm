@@ -17,7 +17,7 @@
 #endif
 
 #define MAX_WINDOWS 512
-#define MAX_MONITORS 16
+#define MONITOR_SLOTS 16
 
 typedef enum { MODE_TILE, MODE_MONOCLE, MODE_FULLSCREEN } Mode;
 
@@ -40,7 +40,7 @@ static HWND topmostWindow = NULL;
 static HWND borderlessWindow = NULL;
 static LONG_PTR savedStyle = 0;
 static int masterPercent = 50;
-static MonitorSlot monitors[MAX_MONITORS];
+static MonitorSlot monitors[MONITOR_SLOTS];
 static int monitorCount = 0;
 
 // Windows that are never worth tiling: shell surfaces, flyouts and tray overflow hosts.
@@ -199,7 +199,7 @@ static BOOL CALLBACK monitorProc(HMONITOR handle, HDC dc, LPRECT rect, LPARAM un
 	MONITORINFO info;
 	info.cbSize = sizeof info;
 
-	if (monitorCount < MAX_MONITORS && GetMonitorInfoW(handle, &info)) {
+	if (monitorCount < MONITOR_SLOTS && GetMonitorInfoW(handle, &info)) {
 		monitors[monitorCount].handle = handle;
 		monitors[monitorCount].work = info.rcWork;
 		monitors[monitorCount].full = info.rcMonitor;
