@@ -1,0 +1,19 @@
+# mingw32-make -f Makefile.mingw        -> build/lightwm.exe
+# mingw32-make -f Makefile.mingw test   -> runs the portable layout/KDL tests with the host gcc
+CC ?= gcc
+SRCS = wm.c tiling.c layout.c kdl.c config.c keyboard.c vdesktop.c altdrag.c error.c
+CFLAGS = -O2 -Wall -Wextra -Wno-unused-parameter -municode -DUNICODE -D_UNICODE -DWINVER=0x0A00 -D_WIN32_WINNT=0x0A00
+LIBS = -luser32 -lkernel32 -ldwmapi -lole32 -lshell32
+
+build/lightwm.exe: $(SRCS) | build
+	$(CC) $(CFLAGS) $(SRCS) -o $@ -mwindows $(LIBS)
+
+build:
+	mkdir build
+
+test:
+	$(CC) -Wall -Wextra -fsanitize=address,undefined -o tests/test_layout tests/test_layout.c layout.c && tests/test_layout
+	$(CC) -Wall -Wextra -fsanitize=address,undefined -o tests/test_kdl tests/test_kdl.c kdl.c && tests/test_kdl
+
+clean:
+	rm -rf build tests/test_layout tests/test_kdl

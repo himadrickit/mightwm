@@ -1,0 +1,27 @@
+// Copy to %APPDATA%\lightwm\config.kdl (LightWM also writes a default there on first run).
+vars {
+    mod "alt"
+    term "wt.exe"
+}
+general {
+    gap 6
+    master-width 50
+    layout "master-stack"
+}
+workspaces {
+    follow-focus true
+    goto "$mod+{1-9}"
+    send "$mod+shift+{1-9}"
+}
+altdrag {
+    enabled true
+    mod "$mod"
+    move "left"
+    resize "right"
+}
+binds {
+    $mod+Return { spawn "$term" }
+    $mod+b { spawn "firefox.exe" }
+    $mod+space { spawn "explorer.exe shell:AppsFolder" }
+    $mod+shift+q { close-window }
+}
