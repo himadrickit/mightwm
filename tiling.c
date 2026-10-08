@@ -40,6 +40,8 @@ static HWND topmostWindow = NULL;
 static HWND borderlessWindow = NULL;
 static LONG_PTR savedStyle = 0;
 static int masterPercent = 50;
+static HWND nativeWindow = NULL;
+static RECT nativeStart;
 static MonitorSlot monitors[MONITOR_SLOTS];
 static int monitorCount = 0;
 
@@ -238,13 +240,8 @@ static void placeWindow(HWND window, LRect target, HWND insertAfter)
 	UINT flags = SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS;
 	if (!insertAfter) flags |= SWP_NOZORDER;
 
-	bool same = frame.left == target.left && frame.top == target.top &&
-		frame.right == target.right && frame.bottom == target.bottom;
-
-	if (same) {
-		if (!insertAfter) return;
-		flags |= SWP_NOMOVE | SWP_NOSIZE;
-	}
+	// Always apply: after a drag, GetWindowRect can still report a position from before
+	// the queued (asynchronous) moves landed, so "already in place" can't be trusted.
 
 	int leftBorder = frame.left - outer.left;
 	int topBorder = frame.top - outer.top;
@@ -660,4 +657,52 @@ void tilingResizeDrop(HWND window, RECT frame, int edgeX)
 	}
 
 	tilingRetile();
+}
+
+// Dragging a tiled window by its title bar (Windows' own move/size loop): hold the tiling
+// still while it lasts, then treat the drop like an altdrag drop.
+void tilingNativeMoveStart(HWND window)
+{
+	nativeWindow = NULL;
+
+	if (!tilingIsTiled(window)) {
+		return;
+	}
+
+	nativeWindow = window;
+	getFrame(window, &nativeStart);
+	suspended = true;
+}
+
+void tilingNativeMoveEnd(HWND window)
+{
+	if (!nativeWindow || window != nativeWindow) {
+		return;
+	}
+
+	HWND dropped = nativeWindow;
+	nativeWindow = NULL;
+	suspended = false;
+
+	RECT end;
+	POINT cursor;
+	getFrame(dropped, &end);
+	GetCursorPos(&cursor);
+
+	const int slack = 3;
+	bool resized = labs((end.right - end.left) - (nativeStart.right - nativeStart.left)) > slack ||
+		labs((end.bottom - end.top) - (nativeStart.bottom - nativeStart.top)) > slack;
+
+	if (!resized) {
+		tilingDragDrop(dropped, cursor);
+		return;
+	}
+
+	int edgeX = 0;
+	bool rightMoved = labs(end.right - nativeStart.right) > slack;
+	bool leftMoved = labs(end.left - nativeStart.left) > slack;
+	if (rightMoved && !leftMoved) edgeX = 1;
+	else if (leftMoved && !rightMoved) edgeX = -1;
+
+	tilingResizeDrop(dropped, end, edgeX);
 }

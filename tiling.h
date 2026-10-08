@@ -25,6 +25,10 @@ void tilingToggleFullscreen(void);
 void tilingToggleEnabled(void);
 void tilingCloseWindow(void);
 
+// Windows' own title-bar drag/resize (EVENT_SYSTEM_MOVESIZESTART / END).
+void tilingNativeMoveStart(HWND window);
+void tilingNativeMoveEnd(HWND window);
+
 // Called by altdrag when a drag ends.
 void tilingDragDrop(HWND window, POINT cursor);
 void tilingResizeDrop(HWND window, RECT frame, int edgeX);

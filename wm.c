@@ -33,7 +33,8 @@ static UINT_PTR hookRefreshTimer = 0;
 static DWORD lastSwitchTick = 0;
 static int lastDesktop = 0;
 static bool running = true;
-static HWINEVENTHOOK eventHooks[4];
+#define EVENT_HOOK_COUNT 5
+static HWINEVENTHOOK eventHooks[EVENT_HOOK_COUNT];
 
 static void scheduleRetile(UINT delay)
 {
@@ -187,6 +188,10 @@ static void CALLBACK winEventProc(HWINEVENTHOOK hook, DWORD event, HWND window, 
 
 	if (event == EVENT_SYSTEM_FOREGROUND) {
 		onForeground(window);
+	} else if (event == EVENT_SYSTEM_MOVESIZESTART) {
+		tilingNativeMoveStart(window);
+	} else if (event == EVENT_SYSTEM_MOVESIZEEND) {
+		tilingNativeMoveEnd(window);
 	} else if (tilingWantsEvent(event, window)) {
 		scheduleRetile(RETILE_DELAY_MS);
 	}
@@ -199,6 +204,7 @@ static void installEventHooks(void)
 	eventHooks[0] = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, NULL, winEventProc, 0, 0, flags);
 	eventHooks[1] = SetWinEventHook(EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND, NULL, winEventProc, 0, 0, flags);
 	eventHooks[2] = SetWinEventHook(EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, NULL, winEventProc, 0, 0, flags);
+	eventHooks[4] = SetWinEventHook(EVENT_SYSTEM_MOVESIZESTART, EVENT_SYSTEM_MOVESIZEEND, NULL, winEventProc, 0, 0, flags);
 	eventHooks[3] = SetWinEventHook(EVENT_OBJECT_CLOAKED, EVENT_OBJECT_UNCLOAKED, NULL, winEventProc, 0, 0, flags);
 }
 
@@ -264,7 +270,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR commandLine, i
 		}
 	}
 
-	for (int i = 0; i < 4; i++) {
+	for (int i = 0; i < EVENT_HOOK_COUNT; i++) {
 		if (eventHooks[i]) UnhookWinEvent(eventHooks[i]);
 	}
 
