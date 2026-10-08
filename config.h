@@ -31,6 +31,7 @@ typedef struct {
 	int masterPercent;
 	LayoutKind layout;
 	bool warpCursor;
+	int floatPercent;
 	bool followFocus;
 	bool blockWindowsDesktopKeys;
 	int desktopBackend;

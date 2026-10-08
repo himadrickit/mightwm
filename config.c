@@ -19,6 +19,7 @@ static const char* const defaultConfig =
 "    gap 6                  // pixels between windows and around the screen edge\n"
 "    master-width 50        // percent of the width the first window takes\n"
 "    layout \"master-stack\"  // \"master-stack\", \"grid\" or \"columns\"\n"
+"    float-size 70          // size (% of the screen) a window gets when you float it with $mod+t\n"
 "    warp-cursor false      // move the mouse to the window you focus by keyboard\n"
 "\n"
 "    // Windows never tiled, matched against window class or exe name.\n"
@@ -362,6 +363,9 @@ static void parseGeneral(Ctx* ctx, const KdlNode* node)
 			else if (!strcmp(value, "grid")) cfg->layout = LAYOUT_GRID;
 			else if (!strcmp(value, "columns")) cfg->layout = LAYOUT_COLUMNS;
 			else note(ctx, "general: unknown layout \"%s\"", value);
+		} else if (!strcmp(n->name, "float-size") && value) {
+			int percent = atoi(value);
+			cfg->floatPercent = percent < 30 ? 30 : percent > 100 ? 100 : percent;
 		} else if (!strcmp(n->name, "warp-cursor")) {
 			cfg->warpCursor = truthy(value);
 		} else if (!strcmp(n->name, "float")) {
@@ -562,6 +566,7 @@ static void setDefaults(Config* cfg)
 	memset(cfg, 0, sizeof *cfg);
 	cfg->gap = 6;
 	cfg->masterPercent = 50;
+	cfg->floatPercent = 70;
 	cfg->layout = LAYOUT_MASTER_STACK;
 	cfg->followFocus = true;
 	cfg->blockWindowsDesktopKeys = true;

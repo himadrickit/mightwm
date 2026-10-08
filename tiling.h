@@ -6,7 +6,13 @@
 
 typedef enum { DIR_LEFT = 0, DIR_RIGHT, DIR_UP, DIR_DOWN } Direction;
 
+typedef void (*TilingScheduler)(UINT delayMs);
+
 void tilingInit(const Config* cfg);
+void tilingSetScheduler(TilingScheduler scheduler);
+bool tilingIsEnabled(void);
+// Invisible resize-border insets of a window, measured at rest and cached (see tiling.c).
+void tilingGetInsets(HWND window, int* left, int* top, int* right, int* bottom);
 void tilingReload(const Config* cfg);
 void tilingRetile(void);
 

@@ -148,14 +148,6 @@ static bool isShellWindow(HWND window)
 		wcscmp(className, L"Shell_TrayWnd") == 0 || wcscmp(className, L"Shell_SecondaryTrayWnd") == 0;
 }
 
-static void readFrame(HWND window, RECT* frame, RECT* outer)
-{
-	GetWindowRect(window, outer);
-	if (DwmGetWindowAttribute(window, DWMWA_EXTENDED_FRAME_BOUNDS, frame, sizeof(RECT)) != S_OK) {
-		*frame = *outer;
-	}
-}
-
 static bool beginDrag(POINT point, DragAction wanted, int button)
 {
 	HWND window = WindowFromPoint(point);
@@ -170,12 +162,13 @@ static bool beginDrag(POINT point, DragAction wanted, int button)
 	}
 
 	RECT outer;
-	readFrame(window, &startFrame, &outer);
+	GetWindowRect(window, &outer);
+	tilingGetInsets(window, &borderLeft, &borderTop, &borderRight, &borderBottom);
 
-	borderLeft = startFrame.left - outer.left;
-	borderTop = startFrame.top - outer.top;
-	borderRight = outer.right - startFrame.right;
-	borderBottom = outer.bottom - startFrame.bottom;
+	startFrame.left = outer.left + borderLeft;
+	startFrame.top = outer.top + borderTop;
+	startFrame.right = outer.right - borderRight;
+	startFrame.bottom = outer.bottom - borderBottom;
 
 	startPoint = point;
 	currentFrame = startFrame;

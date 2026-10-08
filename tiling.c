@@ -40,6 +40,7 @@ static HWND topmostWindow = NULL;
 static HWND borderlessWindow = NULL;
 static LONG_PTR savedStyle = 0;
 static int masterPercent = 50;
+static TilingScheduler scheduler = NULL;
 static HWND nativeWindow = NULL;
 static RECT nativeStart;
 static MonitorSlot monitors[MONITOR_SLOTS];
@@ -82,6 +83,105 @@ static void getFrame(HWND window, RECT* frame)
 	if (DwmGetWindowAttribute(window, DWMWA_EXTENDED_FRAME_BOUNDS, frame, sizeof(RECT)) != S_OK) {
 		GetWindowRect(window, frame);
 	}
+}
+
+
+// ---- Invisible border insets -------------------------------------------------------------
+// Windows 10/11 give resizable windows invisible borders. Their size is a property of the window
+// (and its DPI), not of where it is, so it is measured once while the window is at rest and
+// cached. Measuring right after a move is wrong: DWM reports the frame a moment late, so the
+// "border" would include the distance the window just moved.
+
+#define INSET_CACHE 256
+
+typedef struct {
+	HWND window;
+	UINT dpi;
+	int left, top, right, bottom;
+} InsetEntry;
+
+static InsetEntry insetCache[INSET_CACHE];
+static int insetCount = 0;
+static int insetNext = 0;
+
+static UINT windowDpi(HWND window)
+{
+	typedef UINT (WINAPI *FnGetDpiForWindow)(HWND);
+	static FnGetDpiForWindow fn = NULL;
+	static bool loaded = false;
+
+	if (!loaded) {
+		fn = (FnGetDpiForWindow)(void*)GetProcAddress(GetModuleHandleW(L"user32.dll"), "GetDpiForWindow");
+		loaded = true;
+	}
+
+	UINT dpi = fn ? fn(window) : 0;
+	return dpi ? dpi : 96;
+}
+
+static void forgetDeadInsets(void)
+{
+	for (int i = insetCount - 1; i >= 0; i--) {
+		if (!IsWindow(insetCache[i].window)) {
+			insetCache[i] = insetCache[--insetCount];
+		}
+	}
+	if (insetNext >= INSET_CACHE) insetNext = 0;
+}
+
+void tilingGetInsets(HWND window, int* left, int* top, int* right, int* bottom)
+{
+	UINT dpi = windowDpi(window);
+
+	for (int i = 0; i < insetCount; i++) {
+		if (insetCache[i].window == window && insetCache[i].dpi == dpi) {
+			*left = insetCache[i].left;
+			*top = insetCache[i].top;
+			*right = insetCache[i].right;
+			*bottom = insetCache[i].bottom;
+			return;
+		}
+	}
+
+	RECT outer, frame;
+	GetWindowRect(window, &outer);
+	getFrame(window, &frame);
+
+	int l = frame.left - outer.left, t = frame.top - outer.top;
+	int r = outer.right - frame.right, b = outer.bottom - frame.bottom;
+	int limit = (int)(32 * dpi / 96);
+
+	// A real frame is symmetric left/right and small. Anything else is a transient reading
+	// (maximized, mid-move) and is not trusted or cached.
+	bool plausible = !IsZoomed(window) && l >= 0 && t >= 0 && r >= 0 && b >= 0 &&
+		l <= limit && t <= limit && r <= limit && b <= limit && labs(l - r) <= 2;
+
+	if (!plausible) {
+		*left = *right = *bottom = (int)(7 * dpi / 96);
+		*top = 0;
+		return;
+	}
+
+	InsetEntry* entry = NULL;
+	for (int i = 0; i < insetCount; i++) {
+		if (insetCache[i].window == window) entry = &insetCache[i];
+	}
+	if (!entry) {
+		if (insetCount < INSET_CACHE) entry = &insetCache[insetCount++];
+		else entry = &insetCache[insetNext++ % INSET_CACHE];
+	}
+
+	entry->window = window;
+	entry->dpi = dpi;
+	entry->left = l;
+	entry->top = t;
+	entry->right = r;
+	entry->bottom = b;
+
+	*left = l;
+	*top = t;
+	*right = r;
+	*bottom = b;
 }
 
 static bool getExeName(HWND window, wchar_t* out, DWORD count)
@@ -184,6 +284,7 @@ static void syncWindows(void)
 		if (!IsWindow(floated[i])) removeAt(floated, &floatedCount, i);
 	}
 
+	forgetDeadInsets();
 	EnumWindows(collectProc, 0);
 }
 
@@ -233,26 +334,18 @@ static void placeWindow(HWND window, LRect target, HWND insertAfter)
 		ShowWindow(window, SW_RESTORE);
 	}
 
-	RECT outer, frame;
-	GetWindowRect(window, &outer);
-	getFrame(window, &frame);
-
 	UINT flags = SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS;
 	if (!insertAfter) flags |= SWP_NOZORDER;
 
-	// Always apply: after a drag, GetWindowRect can still report a position from before
-	// the queued (asynchronous) moves landed, so "already in place" can't be trusted.
-
-	int leftBorder = frame.left - outer.left;
-	int topBorder = frame.top - outer.top;
-	int rightBorder = outer.right - frame.right;
-	int bottomBorder = outer.bottom - frame.bottom;
+	// Always applied: a "looks already in place" shortcut can't be trusted right after a drag.
+	int leftInset, topInset, rightInset, bottomInset;
+	tilingGetInsets(window, &leftInset, &topInset, &rightInset, &bottomInset);
 
 	SetWindowPos(window, insertAfter,
-		target.left - leftBorder,
-		target.top - topBorder,
-		(target.right - target.left) + leftBorder + rightBorder,
-		(target.bottom - target.top) + topBorder + bottomBorder,
+		target.left - leftInset,
+		target.top - topInset,
+		(target.right - target.left) + leftInset + rightInset,
+		(target.bottom - target.top) + topInset + bottomInset,
 		flags);
 }
 
@@ -359,6 +452,23 @@ void tilingRetile(void)
 			placeWindow(group[i], rects[i], NULL);
 		}
 	}
+}
+
+void tilingSetScheduler(TilingScheduler value)
+{
+	scheduler = value;
+}
+
+bool tilingIsEnabled(void)
+{
+	return enabled;
+}
+
+// A second pass shortly after drops lets the windows settle and corrects any app that
+// adjusted its own size in the meantime.
+static void followUpRetile(void)
+{
+	if (scheduler) scheduler(150);
 }
 
 void tilingInit(const Config* cfg)
@@ -517,22 +627,45 @@ void tilingMoveDirection(Direction direction)
 	tilingRetile();
 }
 
+// Floating mode: the window leaves the layout, shrinks to a centered floating size on top of
+// the tiles (config: float-size), and can then be moved/resized freely. Toggle again to tile it.
 void tilingToggleFloating(void)
 {
 	syncWindows();
 
-	HWND window = GetForegroundWindow();
+	HWND window = GetAncestor(GetForegroundWindow(), GA_ROOT);
+	if (!window) return;
+
 	int index = indexOf(floated, floatedCount, window);
 
 	if (index >= 0) {
 		removeAt(floated, &floatedCount, index);
-	} else if (indexOf(order, orderCount, window) >= 0 && floatedCount < MAX_WINDOWS) {
-		floated[floatedCount++] = window;
-	} else {
+		tilingRetile();
+		followUpRetile();
 		return;
 	}
 
+	if (indexOf(order, orderCount, window) < 0 || floatedCount >= MAX_WINDOWS) return;
+
+	floated[floatedCount++] = window;
+
+	if (mode == MODE_TILE && enabled) {
+		MONITORINFO info;
+		info.cbSize = sizeof info;
+		GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &info);
+
+		int percent = config->floatPercent < 30 ? 30 : config->floatPercent > 100 ? 100 : config->floatPercent;
+		int width = (info.rcWork.right - info.rcWork.left) * percent / 100;
+		int height = (info.rcWork.bottom - info.rcWork.top) * percent / 100;
+		int left = info.rcWork.left + ((info.rcWork.right - info.rcWork.left) - width) / 2;
+		int top = info.rcWork.top + ((info.rcWork.bottom - info.rcWork.top) - height) / 2;
+
+		LRect target = { left, top, left + width, top + height };
+		placeWindow(window, target, HWND_TOP);
+	}
+
 	tilingRetile();
+	followUpRetile();
 }
 
 static void setMode(Mode requested)
@@ -629,6 +762,7 @@ void tilingDragDrop(HWND window, POINT cursor)
 	}
 
 	tilingRetile();
+	followUpRetile();
 }
 
 // Resizing the master/stack divider with the mouse changes the master width for good.
@@ -657,6 +791,7 @@ void tilingResizeDrop(HWND window, RECT frame, int edgeX)
 	}
 
 	tilingRetile();
+	followUpRetile();
 }
 
 // Dragging a tiled window by its title bar (Windows' own move/size loop): hold the tiling

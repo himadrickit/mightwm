@@ -16,6 +16,8 @@ workspaces and configuration of [nir9/lightwm](https://github.com/nir9/lightwm).
 - **Built-in altdrag.** Hold `mod`, left-drag anywhere on a window to move it (drop it on another tile
   to swap), right-drag to resize (the 3x3 region you grab picks the edges; dragging the master/stack
   divider changes the master width).
+- **Tray icon** (right-click: toggle tiling, retile, reload config, open config, quit; double-click toggles tiling). On Windows 11 it is promoted out of the overflow menu automatically.
+- **Floating mode:** `alt+t` pops the focused window out of the layout to a centered floating size (`float-size`, default 70%) on top; press again to tile it back into its slot.
 - **KDL config** with variables, custom keybinds and `spawn` commands.
 
 No DLL injection: the manager follows windows with `SetWinEventHook`, so it also sees 32-bit apps.

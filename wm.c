@@ -8,6 +8,7 @@
 #include "error.h"
 #include "keyboard.h"
 #include "tiling.h"
+#include "tray.h"
 #include "vdesktop.h"
 
 #ifndef EVENT_OBJECT_CLOAKED
@@ -35,6 +36,8 @@ static int lastDesktop = 0;
 static bool running = true;
 #define EVENT_HOOK_COUNT 5
 static HWINEVENTHOOK eventHooks[EVENT_HOOK_COUNT];
+
+static void refreshTray(void);
 
 static void scheduleRetile(UINT delay)
 {
@@ -67,6 +70,7 @@ static void switchDesktop(int number)
 	lastSwitchTick = GetTickCount();
 	vdGoto(number);
 	scheduleRetile(RETILE_DELAY_MS * 2);
+	refreshTray();
 }
 
 static void spawnCommand(const wchar_t* command)
@@ -117,6 +121,25 @@ static void reloadConfig(void)
 	tilingRetile();
 }
 
+static void refreshTray(void)
+{
+	trayUpdate(tilingIsEnabled(), vdCurrent());
+}
+
+static void reloadConfig(void);
+
+static void trayHandler(int command)
+{
+	switch (command) {
+		case TRAY_TOGGLE_TILING: tilingToggleEnabled(); refreshTray(); break;
+		case TRAY_RETILE: tilingRetile(); break;
+		case TRAY_RELOAD: reloadConfig(); break;
+		case TRAY_EDIT_CONFIG: ShellExecuteW(NULL, L"open", configPath(), NULL, NULL, SW_SHOWNORMAL); break;
+		case TRAY_QUIT: running = false; PostQuitMessage(0); break;
+		default: break;
+	}
+}
+
 static void runAction(const Binding* b)
 {
 	switch (b->action) {
@@ -135,7 +158,7 @@ static void runAction(const Binding* b)
 		case ACT_MONOCLE: tilingToggleMonocle(); break;
 		case ACT_FULLSCREEN: tilingToggleFullscreen(); break;
 		case ACT_RETILE: tilingRetile(); break;
-		case ACT_TOGGLE_TILING: tilingToggleEnabled(); break;
+		case ACT_TOGGLE_TILING: tilingToggleEnabled(); refreshTray(); break;
 		case ACT_RELOAD: reloadConfig(); break;
 		case ACT_QUIT: running = false; break;
 		case ACT_SPAWN: if (b->text) spawnCommand(b->text); break;
@@ -176,6 +199,7 @@ static void onForeground(HWND window)
 
 	if (current != lastDesktop) {
 		lastDesktop = current;
+		refreshTray();
 		scheduleRetile(RETILE_DELAY_MS);
 	} else if (tilingModeActive()) {
 		scheduleRetile(RETILE_DELAY_MS / 2);
@@ -224,14 +248,19 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR commandLine, i
 	setDpiAwareness();
 	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 
+	// First thing on screen: the tray icon, before any config or desktop warnings can pop up.
+	trayInit(instance, trayHandler);
+
 	wchar_t problems[2048];
 	configLoad(&config, problems, 2048);
 
 	wchar_t desktopProblem[512];
 	vdInit(config.desktopBackend, desktopProblem, 512);
 	lastDesktop = vdCurrent();
+	refreshTray();
 
 	tilingInit(&config);
+	tilingSetScheduler(scheduleRetile);
 
 	keyboardInit(&config);
 
@@ -277,6 +306,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR commandLine, i
 	altdragUninstall();
 	keyboardUnregister();
 	tilingReload(&config);
+	trayCleanup();
 	vdCleanup();
 	configFree(&config);
 	CoUninitialize();
