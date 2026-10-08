@@ -7,6 +7,7 @@
 #include "config.h"
 #include "error.h"
 #include "keyboard.h"
+#include "log.h"
 #include "tiling.h"
 #include "tray.h"
 #include "vdesktop.h"
@@ -34,6 +35,7 @@ static UINT_PTR hookRefreshTimer = 0;
 static DWORD lastSwitchTick = 0;
 static int lastDesktop = 0;
 static bool running = true;
+static bool pendingAutoFocus = false;
 #define EVENT_HOOK_COUNT 5
 static HWINEVENTHOOK eventHooks[EVENT_HOOK_COUNT];
 
@@ -69,7 +71,8 @@ static void switchDesktop(int number)
 
 	lastSwitchTick = GetTickCount();
 	vdGoto(number);
-	scheduleRetile(RETILE_DELAY_MS * 2);
+	pendingAutoFocus = true;
+	scheduleRetile(RETILE_DELAY_MS * 3);
 	refreshTray();
 }
 
@@ -111,6 +114,7 @@ static void reloadConfig(void)
 	keyboardUnregister();
 	configFree(&config);
 	configLoad(&config, problems, 2048);
+	logInit(config.debugLog);
 	tilingReload(&config);
 
 	wchar_t keyProblems[2048];
@@ -145,6 +149,7 @@ static void runAction(const Binding* b)
 	switch (b->action) {
 		case ACT_FOCUS_NEXT: tilingFocusRelative(1); break;
 		case ACT_FOCUS_PREV: tilingFocusRelative(-1); break;
+		case ACT_FOCUS_MASTER: tilingFocusMaster(); break;
 		case ACT_FOCUS_LEFT: tilingFocusDirection(DIR_LEFT); break;
 		case ACT_FOCUS_RIGHT: tilingFocusDirection(DIR_RIGHT); break;
 		case ACT_FOCUS_UP: tilingFocusDirection(DIR_UP); break;
@@ -200,7 +205,8 @@ static void onForeground(HWND window)
 	if (current != lastDesktop) {
 		lastDesktop = current;
 		refreshTray();
-		scheduleRetile(RETILE_DELAY_MS);
+		pendingAutoFocus = true;
+		scheduleRetile(RETILE_DELAY_MS * 2);
 	} else if (tilingModeActive()) {
 		scheduleRetile(RETILE_DELAY_MS / 2);
 	}
@@ -217,7 +223,10 @@ static void CALLBACK winEventProc(HWINEVENTHOOK hook, DWORD event, HWND window, 
 	} else if (event == EVENT_SYSTEM_MOVESIZEEND) {
 		tilingNativeMoveEnd(window);
 	} else if (tilingWantsEvent(event, window)) {
-		scheduleRetile(RETILE_DELAY_MS);
+		bool closing = event == EVENT_OBJECT_DESTROY || event == EVENT_OBJECT_HIDE ||
+			event == EVENT_SYSTEM_MINIMIZESTART || event == EVENT_OBJECT_CLOAKED;
+		if (closing) pendingAutoFocus = true;
+		scheduleRetile(closing ? RETILE_DELAY_MS * 3 : RETILE_DELAY_MS);
 	}
 }
 
@@ -253,6 +262,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR commandLine, i
 
 	wchar_t problems[2048];
 	configLoad(&config, problems, 2048);
+	logInit(config.debugLog);
 
 	wchar_t desktopProblem[512];
 	vdInit(config.desktopBackend, desktopProblem, 512);
@@ -293,6 +303,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR commandLine, i
 			KillTimer(NULL, retileTimer);
 			retileTimer = 0;
 			tilingRetile();
+
+			if (pendingAutoFocus) {
+				pendingAutoFocus = false;
+				tilingAutoFocus();
+			}
 		} else {
 			TranslateMessage(&msg);
 			DispatchMessageW(&msg);
@@ -307,6 +322,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR commandLine, i
 	keyboardUnregister();
 	tilingReload(&config);
 	trayCleanup();
+	logClose();
 	vdCleanup();
 	configFree(&config);
 	CoUninitialize();

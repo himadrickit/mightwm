@@ -23,6 +23,9 @@ bool tilingModeActive(void);
 void tilingSetSuspended(bool suspended);
 
 void tilingFocusRelative(int step);
+void tilingFocusMaster(void);
+// Focuses the master window per the auto-focus setting (after closes / desktop switches).
+void tilingAutoFocus(void);
 void tilingFocusDirection(Direction direction);
 void tilingMoveDirection(Direction direction);
 void tilingToggleFloating(void);
@@ -36,5 +39,5 @@ void tilingNativeMoveStart(HWND window);
 void tilingNativeMoveEnd(HWND window);
 
 // Called by altdrag when a drag ends.
-void tilingDragDrop(HWND window, POINT cursor);
+void tilingDragDrop(HWND window, POINT cursor, RECT frame);
 void tilingResizeDrop(HWND window, RECT frame, int edgeX);

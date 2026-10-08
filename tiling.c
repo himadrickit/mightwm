@@ -1,5 +1,6 @@
 #include "tiling.h"
 #include "layout.h"
+#include "log.h"
 #include "vdesktop.h"
 #include <dwmapi.h>
 #include <limits.h>
@@ -513,6 +514,8 @@ void tilingSetSuspended(bool value)
 	suspended = value;
 }
 
+static bool isShellSurface(HWND window);
+
 static void focusWindow(HWND window)
 {
 	if (IsIconic(window)) ShowWindow(window, SW_RESTORE);
@@ -540,6 +543,56 @@ void tilingFocusRelative(int step)
 	int next = current < 0 ? (step > 0 ? 0 : count - 1) : (current + step + count) % count;
 
 	focusWindow(list[next]);
+}
+
+
+// The master window is the first tiled window of the current desktop (the left one in
+// master-stack). With a single window, that window.
+void tilingFocusMaster(void)
+{
+	syncWindows();
+
+	HWND list[MAX_WINDOWS];
+	int count = collectTileable(list);
+
+	if (count > 0) {
+		focusWindow(list[0]);
+	}
+}
+
+void tilingAutoFocus(void)
+{
+	if (!enabled || suspended || !config || config->autoFocus == AUTOFOCUS_OFF || mode != MODE_TILE) {
+		return;
+	}
+
+	syncWindows();
+
+	HWND list[MAX_WINDOWS];
+	int count = collectTileable(list);
+	if (count == 0) {
+		return;
+	}
+
+	HWND foreground = GetAncestor(GetForegroundWindow(), GA_ROOT);
+
+	// Never take focus from a window the user floated.
+	if (foreground && indexOf(floated, floatedCount, foreground) >= 0) {
+		return;
+	}
+
+	if (config->autoFocus == AUTOFOCUS_LOST) {
+		bool lost = !foreground || !IsWindow(foreground) || !IsWindowVisible(foreground) ||
+			isShellSurface(foreground) || !isShownNow(foreground);
+		if (!lost) {
+			return;
+		}
+	}
+
+	if (foreground != list[0]) {
+		logWrite("autofocus: master=%p (was %p)", (void*)list[0], (void*)foreground);
+		focusWindow(list[0]);
+	}
 }
 
 // Picks the closest window in a direction: distance along the axis plus a penalty for being off-axis.
@@ -736,29 +789,92 @@ void tilingCloseWindow(void)
 	}
 }
 
-// Dropping a dragged tile on top of another one swaps their places; anywhere else snaps it back.
-void tilingDragDrop(HWND window, POINT cursor)
+// The visible frame of a window computed from its outer rectangle and cached insets
+// (GetWindowRect is current immediately; DWM's frame bounds can lag).
+static RECT currentFrameOf(HWND window)
 {
-	if (mode == MODE_TILE && enabled) {
-		HWND list[MAX_WINDOWS];
-		int count = collectTileable(list);
-		int a = indexOf(order, orderCount, window);
+	RECT outer;
+	int left, top, right, bottom;
 
-		for (int i = 0; i < count && a >= 0; i++) {
-			RECT frame;
-			if (list[i] == window) continue;
+	GetWindowRect(window, &outer);
+	tilingGetInsets(window, &left, &top, &right, &bottom);
 
-			getFrame(list[i], &frame);
-			if (PtInRect(&frame, cursor)) {
-				int b = indexOf(order, orderCount, list[i]);
-				if (b >= 0) {
-					HWND swap = order[a];
-					order[a] = order[b];
-					order[b] = swap;
-				}
-				break;
+	RECT frame = { outer.left + left, outer.top + top, outer.right - right, outer.bottom - bottom };
+	return frame;
+}
+
+static long long overlapArea(RECT frame, LRect cell)
+{
+	long long width = (frame.right < cell.right ? frame.right : cell.right) - (frame.left > cell.left ? frame.left : cell.left);
+	long long height = (frame.bottom < cell.bottom ? frame.bottom : cell.bottom) - (frame.top > cell.top ? frame.top : cell.top);
+	return (width > 0 && height > 0) ? width * height : 0;
+}
+
+// Which tile did the user drop on? Uses the layout's cells (not the live window frames, which
+// may still be mid-move): first the cell under the cursor, otherwise the cell the dragged
+// window overlaps most. Returns the window that currently sits in that cell.
+static HWND windowAtDrop(POINT cursor, RECT frame)
+{
+	HWND list[MAX_WINDOWS], group[MAX_WINDOWS];
+	LRect cells[MAX_WINDOWS];
+	int count = collectTileable(list);
+
+	HMONITOR monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
+	int grouped = groupOnMonitor(list, count, monitor, group);
+
+	MONITORINFO info;
+	info.cbSize = sizeof info;
+	if (grouped == 0 || !GetMonitorInfoW(monitor, &info)) {
+		return NULL;
+	}
+
+	layoutCompute(config->layout, toLRect(info.rcWork), grouped, config->gap, masterPercent, cells);
+
+	int best = -1;
+	for (int i = 0; i < grouped; i++) {
+		if (cursor.x >= cells[i].left && cursor.x < cells[i].right && cursor.y >= cells[i].top && cursor.y < cells[i].bottom) {
+			best = i;
+			break;
+		}
+	}
+
+	if (best < 0) {
+		long long bestArea = 0;
+		for (int i = 0; i < grouped; i++) {
+			long long area = overlapArea(frame, cells[i]);
+			if (area > bestArea) {
+				bestArea = area;
+				best = i;
 			}
 		}
+	}
+
+	logWrite("drop: cursor=%ld,%ld frame=%ld,%ld,%ld,%ld tiles=%d chosen=%d",
+		cursor.x, cursor.y, frame.left, frame.top, frame.right, frame.bottom, grouped, best);
+
+	return best >= 0 ? group[best] : NULL;
+}
+
+// Dropping a dragged tile on another tile swaps their places; anywhere else snaps it back.
+void tilingDragDrop(HWND window, POINT cursor, RECT frame)
+{
+	if (mode == MODE_TILE && enabled) {
+		HWND target = windowAtDrop(cursor, frame);
+		int a = indexOf(order, orderCount, window);
+
+		if (target && target != window && a >= 0) {
+			int b = indexOf(order, orderCount, target);
+			if (b >= 0) {
+				HWND swap = order[a];
+				order[a] = order[b];
+				order[b] = swap;
+				logWrite("drop: swapped %p with %p", (void*)window, (void*)target);
+			}
+		} else {
+			logWrite("drop: no swap (target=%p window=%p index=%d)", (void*)target, (void*)window, a);
+		}
+	} else {
+		logWrite("drop: ignored (mode=%d enabled=%d)", (int)mode, (int)enabled);
 	}
 
 	tilingRetile();
@@ -800,7 +916,9 @@ void tilingNativeMoveStart(HWND window)
 {
 	nativeWindow = NULL;
 
-	if (!tilingIsTiled(window)) {
+	bool tiled = tilingIsTiled(window);
+	logWrite("native move start: window=%p tiled=%d", (void*)window, (int)tiled);
+	if (!tiled) {
 		return;
 	}
 
@@ -818,6 +936,7 @@ void tilingNativeMoveEnd(HWND window)
 	HWND dropped = nativeWindow;
 	nativeWindow = NULL;
 	suspended = false;
+	logWrite("native move end: window=%p", (void*)dropped);
 
 	RECT end;
 	POINT cursor;
@@ -829,7 +948,7 @@ void tilingNativeMoveEnd(HWND window)
 		labs((end.bottom - end.top) - (nativeStart.bottom - nativeStart.top)) > slack;
 
 	if (!resized) {
-		tilingDragDrop(dropped, cursor);
+		tilingDragDrop(dropped, cursor, currentFrameOf(dropped));
 		return;
 	}
 

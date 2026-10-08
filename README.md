@@ -18,6 +18,7 @@ workspaces and configuration of [nir9/lightwm](https://github.com/nir9/lightwm).
   divider changes the master width).
 - **Tray icon** (right-click: toggle tiling, retile, reload config, open config, quit; double-click toggles tiling). On Windows 11 it is promoted out of the overflow menu automatically.
 - **Floating mode:** `alt+t` pops the focused window out of the layout to a centered floating size (`float-size`, default 70%) on top; press again to tile it back into its slot.
+- **Auto-focus:** after a window closes or you switch desktops, focus goes to the master (left) window, or to the only window. `auto-focus "lost"` (default) does this only when nothing is focused, `"always"` every time, `"off"` never. `alt+g` focuses the master on demand.
 - **KDL config** with variables, custom keybinds and `spawn` commands.
 
 No DLL injection: the manager follows windows with `SetWinEventHook`, so it also sees 32-bit apps.
@@ -76,6 +77,12 @@ numpad0-9 print volumeup volumedown mute playpause nexttrack prevtrack`. Modifie
 - Apps with a minimum size or size-snapping terminals can leave a gap or overlap their cell; no window manager can fix that.
 - Keybinds fire two ways that back each other up: a low-level keyboard hook (sees keys first, so it beats other programs' hotkeys, and is re-installed every 15 s so Windows can't silently drop it) and `RegisterHotKey` (still works while an administrator window has focus; LightWM itself must be elevated for the hook to see those windows too). Binding `alt+f` takes Alt+F (the File menu mnemonic) away from every app. Combos the system handles before hooks see them (`win+l`, `ctrl+alt+del`) can't be bound.
 - `fullscreen` works on whatever window has focus, tiled or not.
+
+## Troubleshooting
+
+Set `debug-log true` in the `general` block of `config.kdl`, reload (`alt+shift+r`) or restart, reproduce the problem and
+open `lightwm.log` next to `lightwm.exe`. It records every altdrag start/end, which window and modifiers were
+involved, where the drop landed, and whether a swap happened.
 
 ## Tests
 

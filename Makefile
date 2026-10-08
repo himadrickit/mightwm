@@ -1,7 +1,7 @@
 # MSVC (run from a "x64 Native Tools Command Prompt"):  nmake        -> release\lightwm.exe
 #                                                        nmake debug  -> debug\lightwm.exe
 # MinGW-w64:  mingw32-make -f Makefile.mingw
-SRCS = wm.c tiling.c layout.c kdl.c config.c keyboard.c vdesktop.c altdrag.c tray.c error.c
+SRCS = wm.c tiling.c layout.c kdl.c config.c keyboard.c vdesktop.c altdrag.c tray.c log.c error.c
 LIBS = kernel32.lib user32.lib gdi32.lib advapi32.lib dwmapi.lib ole32.lib shell32.lib
 CFLAGS = /nologo /utf-8 /W3 /DUNICODE /D_UNICODE /DWINVER=0x0A00 /D_WIN32_WINNT=0x0A00 /D_CRT_SECURE_NO_WARNINGS
 

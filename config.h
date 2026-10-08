@@ -11,10 +11,12 @@ typedef enum {
 	ACT_MOVE_LEFT, ACT_MOVE_RIGHT, ACT_MOVE_UP, ACT_MOVE_DOWN,
 	ACT_CLOSE, ACT_TOGGLE_FLOAT, ACT_MONOCLE, ACT_FULLSCREEN,
 	ACT_RETILE, ACT_TOGGLE_TILING, ACT_RELOAD, ACT_QUIT,
+	ACT_FOCUS_MASTER,
 	ACT_SPAWN, ACT_GOTO, ACT_SEND, ACT_WORKSPACE_NEXT, ACT_WORKSPACE_PREV
 } Action;
 
 enum { BTN_NONE = 0, BTN_LEFT, BTN_RIGHT, BTN_MIDDLE };
+enum { AUTOFOCUS_OFF = 0, AUTOFOCUS_LOST, AUTOFOCUS_ALWAYS };
 
 #define MAX_RULES 64
 
@@ -31,6 +33,8 @@ typedef struct {
 	int masterPercent;
 	LayoutKind layout;
 	bool warpCursor;
+	bool debugLog;
+	int autoFocus;
 	int floatPercent;
 	bool followFocus;
 	bool blockWindowsDesktopKeys;

@@ -1,5 +1,6 @@
 #include "altdrag.h"
 #include "keyboard.h"
+#include "log.h"
 #include "tiling.h"
 #include "vdesktop.h"
 #include <dwmapi.h>
@@ -77,7 +78,9 @@ static LRESULT CALLBACK keyboardProc(int code, WPARAM wparam, LPARAM lparam)
 			if (modifier) {
 				if (down) {
 					modsDown |= modifier;
+					logWrite("key: modifier down vk=0x%lX mods=0x%X", (unsigned long)key->vkCode, modsDown);
 				} else if (up) {
+					logWrite("key: modifier up vk=0x%lX mods=0x%X", (unsigned long)key->vkCode, modsDown);
 					if (disguiseModRelease && (modifier == MOD_ALT || modifier == MOD_WIN)) {
 						disguiseRelease();
 					}
@@ -151,11 +154,20 @@ static bool isShellWindow(HWND window)
 static bool beginDrag(POINT point, DragAction wanted, int button)
 {
 	HWND window = WindowFromPoint(point);
-	if (!window) return false;
+	if (!window) {
+		logWrite("altdrag refused: no window under the cursor");
+		return false;
+	}
 
 	window = GetAncestor(window, GA_ROOT);
-	if (!window || isShellWindow(window)) return false;
-	if (GetWindowThreadProcessId(window, NULL) == GetCurrentThreadId()) return false;
+	if (!window || isShellWindow(window)) {
+		logWrite("altdrag refused: shell or desktop window %p", (void*)window);
+		return false;
+	}
+	if (GetWindowThreadProcessId(window, NULL) == GetCurrentThreadId()) {
+		logWrite("altdrag refused: LightWM's own window");
+		return false;
+	}
 
 	if (IsZoomed(window)) {
 		ShowWindow(window, SW_RESTORE);
@@ -194,6 +206,7 @@ static bool beginDrag(POINT point, DragAction wanted, int button)
 	}
 
 	wasTiled = tilingIsTiled(window);
+	logWrite("altdrag start: window=%p tiled=%d action=%d pt=%ld,%ld", (void*)window, (int)wasTiled, (int)wanted, point.x, point.y);
 	tilingSetSuspended(true);
 
 	SetWindowPos(window, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -246,11 +259,13 @@ static void endDrag(POINT point)
 	dragWindow = NULL;
 	tilingSetSuspended(false);
 
+	logWrite("altdrag end: window=%p tiled=%d pt=%ld,%ld", (void*)window, (int)tiled, point.x, point.y);
+
 	if (!tiled) {
 		return;
 	}
 
-	if (finished == ACTION_MOVE) tilingDragDrop(window, point);
+	if (finished == ACTION_MOVE) tilingDragDrop(window, point, currentFrame);
 	else tilingResizeDrop(window, currentFrame, edgeX);
 }
 
@@ -274,6 +289,15 @@ static LRESULT CALLBACK mouseProc(int code, WPARAM wparam, LPARAM lparam)
 	int button = buttonOf(wparam);
 	bool isDown = wparam == WM_LBUTTONDOWN || wparam == WM_RBUTTONDOWN || wparam == WM_MBUTTONDOWN;
 	bool isUp = wparam == WM_LBUTTONUP || wparam == WM_RBUTTONUP || wparam == WM_MBUTTONUP;
+
+	if (isDown || isUp) {
+		logWrite("mouse: %s button=%d mods=0x%X action=%d enabled=%d wanted=0x%X",
+			isDown ? "down" : "up", button, modsDown, (int)action, (int)config->altdragEnabled, config->altdragMods);
+	}
+
+	if (isDown && action == ACTION_NONE && modsDown != 0 && modsDown != config->altdragMods) {
+		logWrite("altdrag ignored: modifiers held=0x%X, wanted=0x%X", modsDown, config->altdragMods);
+	}
 
 	if (isDown && action == ACTION_NONE && modsDown == config->altdragMods) {
 		DragAction wanted = ACTION_NONE;
@@ -302,6 +326,10 @@ bool altdragInstall(const Config* cfg)
 
 	keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, keyboardProc, instance, 0);
 	mouseHook = SetWindowsHookExW(WH_MOUSE_LL, mouseProc, instance, 0);
+
+	logWrite("hooks installed: keyboard=%p mouse=%p altdrag=%d mods=0x%X move=%d resize=%d (error %lu)",
+		(void*)keyboardHook, (void*)mouseHook, (int)cfg->altdragEnabled, cfg->altdragMods,
+		cfg->altdragMoveButton, cfg->altdragResizeButton, (unsigned long)GetLastError());
 
 	return keyboardHook != NULL && mouseHook != NULL;
 }

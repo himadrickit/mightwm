@@ -21,6 +21,9 @@ static const char* const defaultConfig =
 "    layout \"master-stack\"  // \"master-stack\", \"grid\" or \"columns\"\n"
 "    float-size 70          // size (% of the screen) a window gets when you float it with $mod+t\n"
 "    warp-cursor false      // move the mouse to the window you focus by keyboard\n"
+"    auto-focus \"lost\"     // after a close or desktop switch focus the master (left) window:\n"
+"                           // \"lost\" only if nothing is focused, \"always\", or \"off\"\n"
+"    debug-log false        // true: write lightwm.log next to the exe (for bug reports)\n"
 "\n"
 "    // Windows never tiled, matched against window class or exe name.\n"
 "    // float \"Calculator\" \"mpv.exe\"\n"
@@ -54,6 +57,7 @@ static const char* const defaultConfig =
 "    $mod+shift+k { move-up }\n"
 "    $mod+shift+l { move-right }\n"
 "\n"
+"    $mod+g { focus-master }\n"
 "    $mod+f { fullscreen }\n"
 "    $mod+m { monocle }\n"
 "    $mod+t { toggle-floating }\n"
@@ -281,7 +285,7 @@ static const struct { const char* name; Action action; } actionNames[] = {
 	{ "focus-left", ACT_FOCUS_LEFT }, { "focus-right", ACT_FOCUS_RIGHT }, { "focus-up", ACT_FOCUS_UP }, { "focus-down", ACT_FOCUS_DOWN },
 	{ "move-left", ACT_MOVE_LEFT }, { "move-right", ACT_MOVE_RIGHT }, { "move-up", ACT_MOVE_UP }, { "move-down", ACT_MOVE_DOWN },
 	{ "move-win-left", ACT_MOVE_LEFT }, { "move-win-right", ACT_MOVE_RIGHT }, { "move-win-up", ACT_MOVE_UP }, { "move-win-down", ACT_MOVE_DOWN },
-	{ "close-window", ACT_CLOSE }, { "close", ACT_CLOSE },
+	{ "focus-master", ACT_FOCUS_MASTER }, { "close-window", ACT_CLOSE }, { "close", ACT_CLOSE },
 	{ "toggle-floating", ACT_TOGGLE_FLOAT }, { "monocle", ACT_MONOCLE }, { "toggle-monocle", ACT_MONOCLE },
 	{ "fullscreen", ACT_FULLSCREEN }, { "retile", ACT_RETILE }, { "toggle-tiling", ACT_TOGGLE_TILING },
 	{ "reload-config", ACT_RELOAD }, { "quit", ACT_QUIT }, { "spawn", ACT_SPAWN },
@@ -366,6 +370,13 @@ static void parseGeneral(Ctx* ctx, const KdlNode* node)
 		} else if (!strcmp(n->name, "float-size") && value) {
 			int percent = atoi(value);
 			cfg->floatPercent = percent < 30 ? 30 : percent > 100 ? 100 : percent;
+		} else if (!strcmp(n->name, "auto-focus") && value) {
+			if (!_stricmp(value, "off") || !_stricmp(value, "false")) cfg->autoFocus = AUTOFOCUS_OFF;
+			else if (!_stricmp(value, "lost") || !_stricmp(value, "true")) cfg->autoFocus = AUTOFOCUS_LOST;
+			else if (!_stricmp(value, "always")) cfg->autoFocus = AUTOFOCUS_ALWAYS;
+			else note(ctx, "general: auto-focus must be \"off\", \"lost\" or \"always\"");
+		} else if (!strcmp(n->name, "debug-log")) {
+			cfg->debugLog = truthy(value);
 		} else if (!strcmp(n->name, "warp-cursor")) {
 			cfg->warpCursor = truthy(value);
 		} else if (!strcmp(n->name, "float")) {
@@ -567,6 +578,7 @@ static void setDefaults(Config* cfg)
 	cfg->gap = 6;
 	cfg->masterPercent = 50;
 	cfg->floatPercent = 70;
+	cfg->autoFocus = AUTOFOCUS_LOST;
 	cfg->layout = LAYOUT_MASTER_STACK;
 	cfg->followFocus = true;
 	cfg->blockWindowsDesktopKeys = true;
