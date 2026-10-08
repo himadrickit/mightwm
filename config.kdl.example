@@ -1,27 +1,60 @@
-// Copy to %APPDATA%\lightwm\config.kdl (LightWM also writes a default there on first run).
+// LightWM configuration (KDL). Edit, then press $mod+shift+r to reload.
+
 vars {
-    mod "alt"
+    mod "alt"            // use "win" or "ctrl+alt" if you prefer
     term "wt.exe"
 }
+
 general {
-    gap 6
-    master-width 50
-    layout "master-stack"
+    gap 6                  // pixels between windows and around the screen edge
+    master-width 50        // percent of the width the first window takes
+    layout "master-stack"  // "master-stack", "grid" or "columns"
+    warp-cursor false      // move the mouse to the window you focus by keyboard
+    debug-log true
+    auto-focus "always"
+
+    // Windows never tiled, matched against window class or exe name.
+    // float "Calculator" "mpv.exe"
 }
+
 workspaces {
-    follow-focus true
+    follow-focus true      // focusing a window on another desktop switches to it
     goto "$mod+{1-9}"
     send "$mod+shift+{1-9}"
 }
+
 altdrag {
     enabled true
     mod "$mod"
-    move "left"
-    resize "right"
+    move "left"           // mod + left drag moves, drop on another tile to swap
+    resize "right"        // mod + right drag resizes (the 3x3 region you grab picks the edge)
 }
+
 binds {
-    $mod+Return { spawn "$term" }
-    $mod+b { spawn "firefox.exe" }
-    $mod+space { spawn "explorer.exe shell:AppsFolder" }
+    $mod+h { focus-left }
+    $mod+j { focus-down }
+    $mod+k { focus-up }
+    $mod+l { focus-right }
+    $mod+period { focus-next }
+    $mod+comma  { focus-prev }
+
+    $mod+shift+h { move-left }
+    $mod+shift+j { move-down }
+    $mod+shift+k { move-up }
+    $mod+shift+l { move-right }
+
+    $mod+f { fullscreen }
+    $mod+m { monocle }
+    $mod+t { toggle-floating }
+    $mod+shift+t { retile }
+    $mod+backslash { toggle-tiling }
     $mod+shift+q { close-window }
+    $mod+shift+r { reload-config }
+    $mod+shift+e { quit }
+
+    $mod+bracketleft  { workspace-prev }
+    $mod+bracketright { workspace-next }
+
+    $mod+Return { spawn "$term" }
 }
+
