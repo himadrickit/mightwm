@@ -659,6 +659,31 @@ void tilingRememberFocus(HWND window, int desktop)
 	}
 }
 
+void tilingForgetFocus(int desktop)
+{
+	if (desktop >= 1 && desktop <= MAX_DESKTOP_SLOTS) {
+		focusMemory[desktop] = NULL;
+	}
+}
+
+void tilingPlaceInOrder(HWND window, bool front)
+{
+	int index = indexOf(order, orderCount, window);
+	if (index < 0) return;
+
+	removeAt(order, &orderCount, index);
+
+	if (front) {
+		for (int i = orderCount; i > 0; i--) order[i] = order[i - 1];
+		order[0] = window;
+	} else {
+		order[orderCount] = window;
+	}
+	orderCount++;
+
+	logWrite("order: %p placed at the %s", (void*)window, front ? "front (main window)" : "end of the stack");
+}
+
 // A window can only be focused when it exists, is shown and lives on the desktop we are on.
 static bool canFocusNow(HWND window)
 {

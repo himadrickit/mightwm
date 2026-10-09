@@ -29,6 +29,10 @@ void tilingFocusMaster(void);
 // Each workspace remembers the window that had focus; switching back restores it (falling back
 // to the master window). Every step is written to the debug log.
 void tilingRememberFocus(HWND window, int desktop);
+void tilingForgetFocus(int desktop);
+// Where a window sits in the tiling order: front = it becomes the main window of its workspace,
+// otherwise it joins the end of the stack.
+void tilingPlaceInOrder(HWND window, bool front);
 HWND tilingWorkspaceFocusTarget(int desktop);
 bool tilingIsForeground(HWND window);
 void tilingFocusWindow(HWND window);

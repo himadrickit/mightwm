@@ -30,8 +30,13 @@ general {
 workspaces {
     follow-focus true      // focusing a window on another desktop switches to it
 
-    // Moving a window to another workspace: "follow" goes there with it, "stay" remains here.
-    movetype "stay"
+    // Moving a window to another workspace (alt+shift+N):
+    //   "stay"           you stay here; this workspace's main window takes focus
+    //   "follow"         you go along; the moved window stays focused
+    //   "follow-main"    you go along; the destination's existing main window takes focus
+    //   "follow-promote" you go along; the moved window becomes the destination's main window
+    // A window that arrives joins the end of the stack, except with "follow-promote".
+    movetype "follow-main"
 
     block-windows-shortcuts true  // turn off Windows' own ctrl+win+d / ctrl+win+left/right
     backend "auto"         // "auto" (VirtualDesktopAccessor.dll if present, else built-in), "dll" or "builtin"

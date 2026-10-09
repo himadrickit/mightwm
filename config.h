@@ -16,6 +16,7 @@ typedef enum {
 } Action;
 
 enum { BTN_NONE = 0, BTN_LEFT, BTN_RIGHT, BTN_MIDDLE };
+enum { MOVE_STAY = 0, MOVE_FOLLOW, MOVE_FOLLOW_MAIN, MOVE_FOLLOW_PROMOTE };
 enum { AUTOFOCUS_OFF = 0, AUTOFOCUS_LOST, AUTOFOCUS_ALWAYS };
 
 #define MAX_RULES 64
@@ -40,7 +41,7 @@ typedef struct {
 	int autoFocus;
 	int floatPercent;
 	bool followFocus;
-	bool moveFollows;
+	int moveType;
 	bool blockWindowsDesktopKeys;
 	int desktopBackend;
 

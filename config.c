@@ -33,7 +33,8 @@ static const char* const defaultConfig =
 "    follow-focus true      // focusing a window on another desktop switches to it\n"
 "    block-windows-shortcuts true  // turn off Windows' own ctrl+win+d / ctrl+win+left/right\n"
 "    backend \"auto\"        // \"auto\" (DLL if present, else built-in), \"dll\" or \"builtin\"\n"
-"    movetype \"stay\"       // moving a window to another workspace: \"follow\" it there, or \"stay\" here\n"
+"    movetype \"stay\"       // \"stay\" here | \"follow\" it | \"follow-main\" (go there, focus its main window) |\n"
+"                           // \"follow-promote\" (go there, the moved window becomes the main window)\n"
 "    goto \"$mod+{1-9}\"\n"
 "    send \"$mod+shift+{1-9}\"\n"
 "}\n"
@@ -490,10 +491,13 @@ static void parseWorkspaces(Ctx* ctx, const KdlNode* node)
 		if (!strcmp(n->name, "follow-focus")) {
 			ctx->cfg->followFocus = truthy(value);
 		} else if (!strcmp(n->name, "movetype") || !strcmp(n->name, "move-type")) {
-			if (value && (!_stricmp(value, "follow") || !_stricmp(value, "follows"))) ctx->cfg->moveFollows = true;
-			else if (value && (!_stricmp(value, "stay") || !_stricmp(value, "not-follow") || !_stricmp(value, "not follow") ||
-				!_stricmp(value, "nofollow") || !_stricmp(value, "no-follow"))) ctx->cfg->moveFollows = false;
-			else note(ctx, "workspaces: movetype must be \"follow\" or \"stay\"");
+			if (!value) note(ctx, "workspaces: movetype needs a value");
+			else if (!_stricmp(value, "follow")) ctx->cfg->moveType = MOVE_FOLLOW;
+			else if (!_stricmp(value, "follow-main")) ctx->cfg->moveType = MOVE_FOLLOW_MAIN;
+			else if (!_stricmp(value, "follow-promote")) ctx->cfg->moveType = MOVE_FOLLOW_PROMOTE;
+			else if (!_stricmp(value, "stay") || !_stricmp(value, "not-follow") || !_stricmp(value, "not follow") ||
+				!_stricmp(value, "nofollow") || !_stricmp(value, "no-follow")) ctx->cfg->moveType = MOVE_STAY;
+			else note(ctx, "workspaces: movetype must be \"stay\", \"follow\", \"follow-main\" or \"follow-promote\"");
 		} else if (!strcmp(n->name, "send-follow") && value) {
 			addRangeBindings(ctx, value, ACT_SEND_FOLLOW);
 		} else if (!strcmp(n->name, "send-stay") && value) {
@@ -605,7 +609,7 @@ static void setDefaults(Config* cfg)
 	cfg->autoFocus = AUTOFOCUS_LOST;
 	cfg->layout = LAYOUT_MASTER_STACK;
 	cfg->followFocus = true;
-	cfg->moveFollows = false;
+	cfg->moveType = MOVE_STAY;
 	cfg->blockWindowsDesktopKeys = true;
 	cfg->desktopBackend = 0;
 	cfg->altdragEnabled = true;

@@ -169,9 +169,13 @@ static void switchDesktop(int number)
 	refreshTray();
 }
 
-// Sends the focused window to another workspace. "follow" goes there with it and keeps it
-// focused; "stay" remains here and the master window takes focus.
-static void sendWindow(int number, bool follow)
+// Sends the focused window to another workspace. How you end up depends on `type`:
+//   stay:           you remain here, this workspace's main window takes focus
+//   follow:         you go along, the moved window stays focused
+//   follow-main:    you go along, the destination's existing main window takes focus
+//   follow-promote: you go along, the moved window becomes the destination's main window
+// A window that arrives joins the end of the stack unless it is promoted.
+static void sendWindow(int number, int type)
 {
 	HWND window = GetAncestor(GetForegroundWindow(), GA_ROOT);
 	if (!window || !vdCanControl() || !tilingIsCandidate(window)) return;
@@ -181,14 +185,25 @@ static void sendWindow(int number, bool follow)
 		return;
 	}
 
-	logWrite("send: %p -> workspace %d (%s)", (void*)window, number, follow ? "follow" : "stay");
+	static const char* const names[] = { "stay", "follow", "follow-main", "follow-promote" };
+	logWrite("send: %p -> workspace %d (%s)", (void*)window, number, names[type]);
 
-	if (follow) {
-		tilingRememberFocus(window, number);
-		switchDesktop(number);
-	} else {
-		pendingAutoFocus = true;
-		scheduleRetile(RETILE_DELAY_MS);
+	tilingPlaceInOrder(window, type == MOVE_FOLLOW_PROMOTE);
+
+	switch (type) {
+		case MOVE_FOLLOW:
+		case MOVE_FOLLOW_PROMOTE:
+			tilingRememberFocus(window, number);
+			switchDesktop(number);
+			break;
+		case MOVE_FOLLOW_MAIN:
+			tilingForgetFocus(number);   // no remembered window: the main window gets focus
+			switchDesktop(number);
+			break;
+		default:
+			pendingAutoFocus = true;
+			scheduleRetile(RETILE_DELAY_MS);
+			break;
 	}
 }
 
@@ -318,9 +333,9 @@ static void runAction(const Binding* b)
 		case ACT_QUIT: running = false; break;
 		case ACT_SPAWN: if (b->text) spawnCommand(b->text); break;
 		case ACT_GOTO: switchDesktop(b->arg); break;
-		case ACT_SEND: sendWindow(b->arg, config.moveFollows); break;
-		case ACT_SEND_FOLLOW: sendWindow(b->arg, true); break;
-		case ACT_SEND_STAY: sendWindow(b->arg, false); break;
+		case ACT_SEND: sendWindow(b->arg, config.moveType); break;
+		case ACT_SEND_FOLLOW: sendWindow(b->arg, config.moveType >= MOVE_FOLLOW ? config.moveType : MOVE_FOLLOW); break;
+		case ACT_SEND_STAY: sendWindow(b->arg, MOVE_STAY); break;
 		case ACT_MASTER_CYCLE: tilingCycleMaster(); break;
 		case ACT_MASTER_GROW: tilingAdjustMaster(5); break;
 		case ACT_MASTER_SHRINK: tilingAdjustMaster(-5); break;
