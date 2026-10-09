@@ -11,3 +11,6 @@ void altdragUninstall(void);
 // Windows silently drops slow low-level hooks and other programs can insert theirs in front of ours.
 // Re-installing while idle puts us back first in line.
 void altdragRefreshHooks(void);
+
+// Applies a throttled drag update that was still pending; returns true if `timerId` was ours.
+bool altdragHandleTimer(UINT_PTR timerId);

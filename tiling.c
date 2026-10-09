@@ -329,6 +329,36 @@ static int groupOnMonitor(HWND* list, int count, HMONITOR monitor, HWND* out)
 
 // Puts the visible frame of `window` exactly on `target`, compensating for the invisible borders
 // Windows 10/11 add around resizable windows (which is what makes naive tiling leave gaps).
+// Windows that were just moved by a drag. Their GetWindowRect can still show a position from
+// before the queued (asynchronous) moves landed, so they are always re-applied once.
+#define DIRTY_SLOTS 8
+static HWND dirtyWindows[DIRTY_SLOTS];
+
+static void markDirty(HWND window)
+{
+	for (int i = 0; i < DIRTY_SLOTS; i++) {
+		if (dirtyWindows[i] == window) return;
+	}
+	for (int i = 0; i < DIRTY_SLOTS; i++) {
+		if (!dirtyWindows[i]) {
+			dirtyWindows[i] = window;
+			return;
+		}
+	}
+	dirtyWindows[0] = window;
+}
+
+static bool takeDirty(HWND window)
+{
+	for (int i = 0; i < DIRTY_SLOTS; i++) {
+		if (dirtyWindows[i] == window) {
+			dirtyWindows[i] = NULL;
+			return true;
+		}
+	}
+	return false;
+}
+
 static void placeWindow(HWND window, LRect target, HWND insertAfter)
 {
 	if (IsZoomed(window)) {
@@ -338,16 +368,26 @@ static void placeWindow(HWND window, LRect target, HWND insertAfter)
 	UINT flags = SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS;
 	if (!insertAfter) flags |= SWP_NOZORDER;
 
-	// Always applied: a "looks already in place" shortcut can't be trusted right after a drag.
 	int leftInset, topInset, rightInset, bottomInset;
 	tilingGetInsets(window, &leftInset, &topInset, &rightInset, &bottomInset);
 
-	SetWindowPos(window, insertAfter,
-		target.left - leftInset,
-		target.top - topInset,
-		(target.right - target.left) + leftInset + rightInset,
-		(target.bottom - target.top) + topInset + bottomInset,
-		flags);
+	int x = target.left - leftInset;
+	int y = target.top - topInset;
+	int width = (target.right - target.left) + leftInset + rightInset;
+	int height = (target.bottom - target.top) + topInset + bottomInset;
+
+	// Re-applying every window on every retile made desktop switches and bursts of events
+	// janky (every app re-lays itself out). Tiles already exactly in place are left alone.
+	bool dirty = takeDirty(window);
+	if (!dirty && !insertAfter) {
+		RECT outer;
+		GetWindowRect(window, &outer);
+		if (outer.left == x && outer.top == y && outer.right - outer.left == width && outer.bottom - outer.top == height) {
+			return;
+		}
+	}
+
+	SetWindowPos(window, insertAfter, x, y, width, height, flags);
 }
 
 static void leaveBorderless(void)
@@ -516,13 +556,45 @@ void tilingSetSuspended(bool value)
 
 static bool isShellSurface(HWND window);
 
+// Windows refuses SetForegroundWindow from a background process and flashes the taskbar button
+// instead. Briefly sharing input state with the current foreground thread is the standard way
+// window managers get around that.
+static void forceForeground(HWND window)
+{
+	HWND foreground = GetForegroundWindow();
+	if (foreground == window) return;
+
+	DWORD me = GetCurrentThreadId();
+	DWORD foregroundThread = foreground ? GetWindowThreadProcessId(foreground, NULL) : 0;
+	DWORD targetThread = GetWindowThreadProcessId(window, NULL);
+
+	bool attachedForeground = foregroundThread && foregroundThread != me && AttachThreadInput(me, foregroundThread, TRUE);
+	bool attachedTarget = targetThread && targetThread != me && targetThread != foregroundThread && AttachThreadInput(me, targetThread, TRUE);
+
+	BringWindowToTop(window);
+	if (!SetForegroundWindow(window)) {
+		SwitchToThisWindow(window, FALSE);
+	}
+
+	if (attachedTarget) AttachThreadInput(me, targetThread, FALSE);
+	if (attachedForeground) AttachThreadInput(me, foregroundThread, FALSE);
+
+	if (GetForegroundWindow() != window) {
+		// Still refused: at least do not leave the button flashing.
+		FLASHWINFO flash;
+		memset(&flash, 0, sizeof flash);
+		flash.cbSize = sizeof flash;
+		flash.hwnd = window;
+		flash.dwFlags = FLASHW_STOP;
+		FlashWindowEx(&flash);
+	}
+}
+
 static void focusWindow(HWND window)
 {
 	if (IsIconic(window)) ShowWindow(window, SW_RESTORE);
 
-	if (!SetForegroundWindow(window)) {
-		SwitchToThisWindow(window, FALSE);
-	}
+	forceForeground(window);
 
 	if (config && config->warpCursor) {
 		RECT frame;
@@ -547,16 +619,27 @@ void tilingFocusRelative(int step)
 
 
 // The master window is the first tiled window of the current desktop (the left one in
-// master-stack). With a single window, that window.
+// master-stack); with a single window, that window. Found straight from the known window
+// order with cheap checks, so it can run right after a desktop switch.
+static HWND findMaster(void)
+{
+	for (int i = 0; i < orderCount; i++) {
+		HWND window = order[i];
+
+		if (!IsWindow(window) || !IsWindowVisible(window) || IsIconic(window)) continue;
+		if (indexOf(floated, floatedCount, window) >= 0) continue;
+		if (!vdWindowOnCurrent(window)) continue;
+
+		return window;
+	}
+	return NULL;
+}
+
 void tilingFocusMaster(void)
 {
-	syncWindows();
-
-	HWND list[MAX_WINDOWS];
-	int count = collectTileable(list);
-
-	if (count > 0) {
-		focusWindow(list[0]);
+	HWND master = findMaster();
+	if (master) {
+		focusWindow(master);
 	}
 }
 
@@ -566,11 +649,8 @@ void tilingAutoFocus(void)
 		return;
 	}
 
-	syncWindows();
-
-	HWND list[MAX_WINDOWS];
-	int count = collectTileable(list);
-	if (count == 0) {
+	HWND master = findMaster();
+	if (!master) {
 		return;
 	}
 
@@ -589,9 +669,9 @@ void tilingAutoFocus(void)
 		}
 	}
 
-	if (foreground != list[0]) {
-		logWrite("autofocus: master=%p (was %p)", (void*)list[0], (void*)foreground);
-		focusWindow(list[0]);
+	if (foreground != master) {
+		logWrite("autofocus: master=%p (was %p)", (void*)master, (void*)foreground);
+		focusWindow(master);
 	}
 }
 
@@ -858,6 +938,8 @@ static HWND windowAtDrop(POINT cursor, RECT frame)
 // Dropping a dragged tile on another tile swaps their places; anywhere else snaps it back.
 void tilingDragDrop(HWND window, POINT cursor, RECT frame)
 {
+	markDirty(window);
+
 	if (mode == MODE_TILE && enabled) {
 		HWND target = windowAtDrop(cursor, frame);
 		int a = indexOf(order, orderCount, window);
@@ -884,6 +966,8 @@ void tilingDragDrop(HWND window, POINT cursor, RECT frame)
 // Resizing the master/stack divider with the mouse changes the master width for good.
 void tilingResizeDrop(HWND window, RECT frame, int edgeX)
 {
+	markDirty(window);
+
 	if (mode == MODE_TILE && enabled && edgeX != 0 && config->layout == LAYOUT_MASTER_STACK) {
 		HWND list[MAX_WINDOWS], group[MAX_WINDOWS];
 		int count = collectTileable(list);

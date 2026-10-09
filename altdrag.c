@@ -38,6 +38,15 @@ static RECT currentFrame;
 static int borderLeft, borderTop, borderRight, borderBottom;
 static int edgeX, edgeY;
 
+// Mouse moves arrive up to ~1000 times a second. Moving a window that often just queues work
+// the app cannot keep up with, so updates are limited to ~144 per second; a short timer
+// applies the newest position if the mouse stops in between.
+#define MIN_UPDATE_MS 7
+static POINT latestPoint;
+static bool updatePending = false;
+static UINT_PTR flushTimer = 0;
+static LARGE_INTEGER counterFrequency, lastUpdate;
+
 static UINT modifierOf(DWORD vk)
 {
 	switch (vk) {
@@ -77,8 +86,11 @@ static LRESULT CALLBACK keyboardProc(int code, WPARAM wparam, LPARAM lparam)
 
 			if (modifier) {
 				if (down) {
+					UINT before = modsDown;
 					modsDown |= modifier;
-					logWrite("key: modifier down vk=0x%lX mods=0x%X", (unsigned long)key->vkCode, modsDown);
+					if (before != modsDown) {
+						logWrite("key: modifier down vk=0x%lX mods=0x%X", (unsigned long)key->vkCode, modsDown);
+					}
 				} else if (up) {
 					logWrite("key: modifier up vk=0x%lX mods=0x%X", (unsigned long)key->vkCode, modsDown);
 					if (disguiseModRelease && (modifier == MOD_ALT || modifier == MOD_WIN)) {
@@ -183,6 +195,9 @@ static bool beginDrag(POINT point, DragAction wanted, int button)
 	startFrame.bottom = outer.bottom - borderBottom;
 
 	startPoint = point;
+	latestPoint = point;
+	updatePending = false;
+	QueryPerformanceCounter(&lastUpdate);
 	currentFrame = startFrame;
 	dragWindow = window;
 	action = wanted;
@@ -214,14 +229,18 @@ static bool beginDrag(POINT point, DragAction wanted, int button)
 	return true;
 }
 
-static void updateDrag(POINT point)
+static void applyDrag(void)
 {
-	int dx = point.x - startPoint.x;
-	int dy = point.y - startPoint.y;
+	updatePending = false;
+
+	int dx = latestPoint.x - startPoint.x;
+	int dy = latestPoint.y - startPoint.y;
 	RECT frame = startFrame;
+	UINT flags = SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS;
 
 	if (action == ACTION_MOVE) {
 		OffsetRect(&frame, dx, dy);
+		flags |= SWP_NOSIZE;   // a pure move must not make the app re-layout its contents
 	} else {
 		if (edgeX < 0) frame.left += dx;
 		if (edgeX > 0) frame.right += dx;
@@ -245,11 +264,51 @@ static void updateDrag(POINT point)
 		frame.top - borderTop,
 		(frame.right - frame.left) + borderLeft + borderRight,
 		(frame.bottom - frame.top) + borderTop + borderBottom,
-		SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS);
+		flags);
+
+	QueryPerformanceCounter(&lastUpdate);
+}
+
+static void updateDrag(POINT point)
+{
+	latestPoint = point;
+	updatePending = true;
+
+	LARGE_INTEGER now;
+	QueryPerformanceCounter(&now);
+	long long elapsedMs = (now.QuadPart - lastUpdate.QuadPart) * 1000 / counterFrequency.QuadPart;
+
+	if (elapsedMs >= MIN_UPDATE_MS) {
+		applyDrag();
+	} else if (!flushTimer) {
+		flushTimer = SetTimer(NULL, 0, MIN_UPDATE_MS, NULL);
+	}
+}
+
+bool altdragHandleTimer(UINT_PTR timerId)
+{
+	if (!flushTimer || timerId != flushTimer) {
+		return false;
+	}
+
+	KillTimer(NULL, flushTimer);
+	flushTimer = 0;
+
+	if (action != ACTION_NONE && updatePending) {
+		applyDrag();
+	}
+	return true;
 }
 
 static void endDrag(POINT point)
 {
+	if (flushTimer) {
+		KillTimer(NULL, flushTimer);
+		flushTimer = 0;
+	}
+	latestPoint = point;
+	applyDrag();   // land exactly where the button was released
+
 	DragAction finished = action;
 	HWND window = dragWindow;
 	bool tiled = wasTiled;
@@ -321,6 +380,7 @@ static LRESULT CALLBACK mouseProc(int code, WPARAM wparam, LPARAM lparam)
 bool altdragInstall(const Config* cfg)
 {
 	config = cfg;
+	QueryPerformanceFrequency(&counterFrequency);
 	ownerThread = GetCurrentThreadId();
 	HINSTANCE instance = GetModuleHandleW(NULL);
 

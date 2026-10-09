@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <shellapi.h>
+#include <tlhelp32.h>
 #include <objbase.h>
 #include <stdio.h>
 #include <wchar.h>
@@ -71,8 +72,10 @@ static void switchDesktop(int number)
 
 	lastSwitchTick = GetTickCount();
 	vdGoto(number);
+	// Focus the new desktop's master right away instead of waiting for the delayed retile.
+	tilingAutoFocus();
 	pendingAutoFocus = true;
-	scheduleRetile(RETILE_DELAY_MS * 3);
+	scheduleRetile(RETILE_DELAY_MS * 2);
 	refreshTray();
 }
 
@@ -105,6 +108,39 @@ static void spawnCommand(const wchar_t* command)
 	}
 
 	ShellExecuteW(NULL, L"open", file, params, NULL, SW_SHOWNORMAL);
+}
+
+// Another Alt+drag tool (AltDrag, AltSnap) hooks the mouse in front of LightWM and swallows
+// the clicks, so LightWM's own altdrag never sees them. Say so instead of failing silently.
+static void detectAltDragConflict(wchar_t* message, size_t count)
+{
+	message[0] = 0;
+
+	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	if (snapshot == INVALID_HANDLE_VALUE) {
+		return;
+	}
+
+	PROCESSENTRY32W entry;
+	entry.dwSize = sizeof entry;
+
+	for (BOOL ok = Process32FirstW(snapshot, &entry); ok; ok = Process32NextW(snapshot, &entry)) {
+		wchar_t lower[MAX_PATH];
+		wcsncpy(lower, entry.szExeFile, MAX_PATH - 1);
+		lower[MAX_PATH - 1] = 0;
+		_wcslwr(lower);
+
+		if (wcsstr(lower, L"altdrag") || wcsstr(lower, L"altsnap")) {
+			swprintf(message, count,
+				L"%ls is running. It also handles Alt+mouse-drag and grabs the clicks before LightWM, "
+				L"so LightWM's own altdrag (move, resize, swap tiles) cannot work. Quit it to use LightWM's.\n",
+				entry.szExeFile);
+			logWrite("conflict: %ls is running", entry.szExeFile);
+			break;
+		}
+	}
+
+	CloseHandle(snapshot);
 }
 
 static void reloadConfig(void)
@@ -285,6 +321,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR commandLine, i
 	installEventHooks();
 	hookRefreshTimer = SetTimer(NULL, 0, HOOK_REFRESH_MS, NULL);
 
+	if (config.altdragEnabled) {
+		wchar_t conflict[512];
+		detectAltDragConflict(conflict, 512);
+		wcsncat(problems, conflict, 2048 - wcslen(problems) - 1);
+	}
 	if (desktopProblem[0]) {
 		wcsncat(problems, desktopProblem, 2048 - wcslen(problems) - 1);
 	}
@@ -297,6 +338,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR commandLine, i
 		if (msg.message == WM_LWM_ACTION || msg.message == WM_HOTKEY) {
 			const Binding* binding = keyboardLookup(msg.wParam);
 			if (binding && !keyboardIsDuplicate(msg.wParam)) runAction(binding);
+		} else if (msg.message == WM_TIMER && msg.hwnd == NULL && altdragHandleTimer(msg.wParam)) {
+			// a throttled drag update was applied
 		} else if (msg.message == WM_TIMER && msg.hwnd == NULL && msg.wParam == hookRefreshTimer) {
 			altdragRefreshHooks();
 		} else if (msg.message == WM_TIMER && msg.hwnd == NULL && msg.wParam == retileTimer) {

@@ -80,6 +80,10 @@ numpad0-9 print volumeup volumedown mute playpause nexttrack prevtrack`. Modifie
 
 ## Troubleshooting
 
+**Alt+drag does nothing / windows move but never swap:** another Alt-drag tool (AltDrag, AltSnap) is running. Both
+hook the mouse in front of LightWM and swallow the clicks. LightWM warns about this at startup; quit the other tool
+(`Get-Process | Where-Object { $_.Name -match 'alt(drag|snap)' }` in PowerShell shows it).
+
 Set `debug-log true` in the `general` block of `config.kdl`, reload (`alt+shift+r`) or restart, reproduce the problem and
 open `lightwm.log` next to `lightwm.exe`. It records every altdrag start/end, which window and modifiers were
 involved, where the drop landed, and whether a swap happened.
