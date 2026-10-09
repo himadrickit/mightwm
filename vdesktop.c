@@ -2,6 +2,7 @@
 #include <objbase.h>
 #include <stdio.h>
 #include <wchar.h>
+#include <string.h>
 
 // ---------------------------------------------------------------------------------------------
 // Public IVirtualDesktopManager (documented in shobjidl_core.h)

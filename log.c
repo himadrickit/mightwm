@@ -5,6 +5,7 @@
 #include <wchar.h>
 
 static FILE* logFile = NULL;
+static wchar_t logFilePath[MAX_PATH];
 
 void logInit(bool enabled)
 {
@@ -18,6 +19,7 @@ void logInit(bool enabled)
 	path[length] = 0;
 	wcsncat(path, L"lightwm.log", MAX_PATH - wcslen(path) - 1);
 
+	wcsncpy(logFilePath, path, MAX_PATH - 1);
 	logFile = _wfopen(path, L"a");
 	if (logFile) {
 		fprintf(logFile, "---- LightWM started ----\n");
@@ -48,4 +50,14 @@ void logClose(void)
 		fclose(logFile);
 		logFile = NULL;
 	}
+}
+
+bool logEnabled(void)
+{
+	return logFile != NULL;
+}
+
+const wchar_t* logPath(void)
+{
+	return logFilePath;
 }

@@ -1,4 +1,5 @@
 // LightWM configuration (KDL). Edit, then press $mod+shift+r to reload.
+// Location: %APPDATA%\lightwm\config.kdl (or config.kdl next to lightwm.exe)
 
 vars {
     mod "alt"            // use "win" or "ctrl+alt" if you prefer
@@ -7,11 +8,20 @@ vars {
 
 general {
     gap 6                  // pixels between windows and around the screen edge
-    master-width 50        // percent of the width the first window takes
+
+    // Width of the main (left) window in %, when there are other windows (alone it fills the screen).
+    // The first value is the starting width; $mod+w cycles through the others.
+    autowidth 65 60 70
+
     layout "master-stack"  // "master-stack", "grid" or "columns"
+    float-size 70          // size (% of the screen) a window gets when you float it with $mod+t
     warp-cursor false      // move the mouse to the window you focus by keyboard
-    debug-log true
+
+    // After a window closes or you switch workspace, focus goes to the master (left) window.
+    // "lost" = only when nothing is focused, "always" = every time, "off" = never.
     auto-focus "always"
+
+    debug-log true         // writes lightwm.log next to lightwm.exe (tray menu: Open debug log)
 
     // Windows never tiled, matched against window class or exe name.
     // float "Calculator" "mpv.exe"
@@ -19,8 +29,17 @@ general {
 
 workspaces {
     follow-focus true      // focusing a window on another desktop switches to it
+
+    // Moving a window to another workspace: "follow" goes there with it, "stay" remains here.
+    movetype "stay"
+
+    block-windows-shortcuts true  // turn off Windows' own ctrl+win+d / ctrl+win+left/right
+    backend "auto"         // "auto" (VirtualDesktopAccessor.dll if present, else built-in), "dll" or "builtin"
+
     goto "$mod+{1-9}"
-    send "$mod+shift+{1-9}"
+    send "$mod+shift+{1-9}"           // uses movetype above
+    // send-follow "$mod+ctrl+{1-9}"  // always follows, whatever movetype says
+    // send-stay "$mod+ctrl+shift+{1-9}"
 }
 
 altdrag {
@@ -37,6 +56,7 @@ binds {
     $mod+l { focus-right }
     $mod+period { focus-next }
     $mod+comma  { focus-prev }
+    $mod+g { focus-master }
 
     $mod+shift+h { move-left }
     $mod+shift+j { move-down }
@@ -52,9 +72,12 @@ binds {
     $mod+shift+r { reload-config }
     $mod+shift+e { quit }
 
+    $mod+w { master-cycle }       // next autowidth preset (65 -> 60 -> 70 -> ...)
+    $mod+equal { master-grow }    // main window +5%
+    $mod+minus { master-shrink }  // main window -5%
+
     $mod+bracketleft  { workspace-prev }
     $mod+bracketright { workspace-next }
 
     $mod+Return { spawn "$term" }
 }
-

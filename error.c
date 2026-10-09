@@ -1,6 +1,7 @@
 #include <windows.h>
 #include "error.h"
 #include <stdio.h>
+#include <wchar.h>
 
 void reportGeneralError(const WCHAR* message)
 {

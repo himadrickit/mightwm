@@ -1,5 +1,6 @@
 #include "tray.h"
 #include "layout.h"
+#include "log.h"
 #include <shellapi.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -144,6 +145,9 @@ static void showMenu(void)
 	AppendMenuW(menu, MF_STRING, TRAY_RETILE, L"Retile now");
 	AppendMenuW(menu, MF_STRING, TRAY_RELOAD, L"Reload config");
 	AppendMenuW(menu, MF_STRING, TRAY_EDIT_CONFIG, L"Open config file");
+	if (logEnabled()) {
+		AppendMenuW(menu, MF_STRING, TRAY_OPEN_LOG, L"Open debug log");
+	}
 	AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
 	AppendMenuW(menu, MF_STRING, TRAY_QUIT, L"Quit LightWM");
 

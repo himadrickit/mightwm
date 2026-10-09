@@ -24,6 +24,17 @@ void tilingSetSuspended(bool suspended);
 
 void tilingFocusRelative(int step);
 void tilingFocusMaster(void);
+
+// ---- per-workspace focus memory ----
+// Each workspace remembers the window that had focus; switching back restores it (falling back
+// to the master window). Every step is written to the debug log.
+void tilingRememberFocus(HWND window, int desktop);
+HWND tilingWorkspaceFocusTarget(int desktop);
+bool tilingIsForeground(HWND window);
+void tilingFocusWindow(HWND window);
+void tilingClearAlert(HWND window);
+void tilingDescribe(HWND window, char* out, size_t size);
+void tilingLogFocusTable(void);
 // Focuses the master window per the auto-focus setting (after closes / desktop switches).
 void tilingAutoFocus(void);
 void tilingFocusDirection(Direction direction);
@@ -32,6 +43,8 @@ void tilingToggleFloating(void);
 void tilingToggleMonocle(void);
 void tilingToggleFullscreen(void);
 void tilingToggleEnabled(void);
+void tilingAdjustMaster(int deltaPercent);
+void tilingCycleMaster(void);
 void tilingCloseWindow(void);
 
 // Windows' own title-bar drag/resize (EVENT_SYSTEM_MOVESIZESTART / END).

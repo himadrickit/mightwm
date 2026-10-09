@@ -66,17 +66,130 @@ static void setDpiAwareness(void)
 	}
 }
 
+// ---- Workspace focus ------------------------------------------------------------------------
+// After a switch, the workspace's remembered window gets focus. Attempts are verified and
+// retried, abandoned if you already moved on, and never aimed at a window that is not on the
+// current desktop - the cases that made Windows flash taskbar buttons instead of focusing.
+#define FOCUS_VERIFY_MS 70
+#define FOCUS_BURST_MS 200
+#define FOCUS_MAX_ATTEMPTS 4
+
+static int focusDesktop = 0;
+static int focusAttempts = 0;
+static UINT_PTR focusTimer = 0;
+
+static void attemptWorkspaceFocus(void)
+{
+	int desktop = focusDesktop;
+
+	if (desktop == 0) return;
+	if (config.autoFocus == AUTOFOCUS_OFF) {
+		focusDesktop = 0;
+		return;
+	}
+
+	int current = vdCurrent();
+	if (current != desktop) {
+		logWrite("focus: workspace %d abandoned, now on %d", desktop, current);
+		focusDesktop = 0;
+		return;
+	}
+
+	HWND target = tilingWorkspaceFocusTarget(desktop);
+	if (!target) {
+		logWrite("focus: workspace %d has no window to focus", desktop);
+		focusDesktop = 0;
+		return;
+	}
+
+	if (tilingIsForeground(target)) {
+		if (logEnabled()) {
+			char text[320];
+			tilingDescribe(target, text, sizeof text);
+			logWrite("focus: workspace %d ok after %d attempt(s): %s", desktop, focusAttempts, text);
+			tilingLogFocusTable();
+		}
+		tilingClearAlert(target);
+		focusDesktop = 0;
+		return;
+	}
+
+	if (focusAttempts >= FOCUS_MAX_ATTEMPTS) {
+		logWrite("focus: gave up on workspace %d after %d attempts", desktop, focusAttempts);
+		tilingClearAlert(target);
+		tilingLogFocusTable();
+		focusDesktop = 0;
+		return;
+	}
+
+	focusAttempts++;
+	if (logEnabled()) {
+		char text[320];
+		tilingDescribe(target, text, sizeof text);
+		logWrite("focus: workspace %d attempt %d -> %s", desktop, focusAttempts, text);
+	}
+
+	tilingFocusWindow(target);
+	focusTimer = SetTimer(NULL, 0, FOCUS_VERIFY_MS, NULL);   // verify, retry if it did not stick
+}
+
+static void requestWorkspaceFocus(int desktop, bool immediate)
+{
+	if (focusTimer) {
+		KillTimer(NULL, focusTimer);
+		focusTimer = 0;
+	}
+
+	focusDesktop = desktop;
+	focusAttempts = 0;
+
+	if (immediate) {
+		attemptWorkspaceFocus();
+	} else {
+		focusTimer = SetTimer(NULL, 0, FOCUS_VERIFY_MS, NULL);
+	}
+}
+
 static void switchDesktop(int number)
 {
 	if (!vdCanControl() || number < 1) return;
 
-	lastSwitchTick = GetTickCount();
+	// Pressing alt+1, alt+2, alt+3 quickly: only the workspace you end on gets focus, so
+	// nothing is focused while another switch is already on its way.
+	DWORD now = GetTickCount();
+	bool burst = now - lastSwitchTick < FOCUS_BURST_MS;
+	lastSwitchTick = now;
+
 	vdGoto(number);
-	// Focus the new desktop's master right away instead of waiting for the delayed retile.
-	tilingAutoFocus();
-	pendingAutoFocus = true;
+	lastDesktop = number;
+	logWrite("switch: workspace %d%s", number, burst ? " (burst)" : "");
+
+	requestWorkspaceFocus(number, !burst);
 	scheduleRetile(RETILE_DELAY_MS * 2);
 	refreshTray();
+}
+
+// Sends the focused window to another workspace. "follow" goes there with it and keeps it
+// focused; "stay" remains here and the master window takes focus.
+static void sendWindow(int number, bool follow)
+{
+	HWND window = GetAncestor(GetForegroundWindow(), GA_ROOT);
+	if (!window || !vdCanControl() || !tilingIsCandidate(window)) return;
+
+	if (!vdMoveWindow(window, number)) {
+		logWrite("send: could not move %p to workspace %d", (void*)window, number);
+		return;
+	}
+
+	logWrite("send: %p -> workspace %d (%s)", (void*)window, number, follow ? "follow" : "stay");
+
+	if (follow) {
+		tilingRememberFocus(window, number);
+		switchDesktop(number);
+	} else {
+		pendingAutoFocus = true;
+		scheduleRetile(RETILE_DELAY_MS);
+	}
 }
 
 static void spawnCommand(const wchar_t* command)
@@ -174,6 +287,7 @@ static void trayHandler(int command)
 		case TRAY_TOGGLE_TILING: tilingToggleEnabled(); refreshTray(); break;
 		case TRAY_RETILE: tilingRetile(); break;
 		case TRAY_RELOAD: reloadConfig(); break;
+		case TRAY_OPEN_LOG: ShellExecuteW(NULL, L"open", logPath(), NULL, NULL, SW_SHOWNORMAL); break;
 		case TRAY_EDIT_CONFIG: ShellExecuteW(NULL, L"open", configPath(), NULL, NULL, SW_SHOWNORMAL); break;
 		case TRAY_QUIT: running = false; PostQuitMessage(0); break;
 		default: break;
@@ -204,13 +318,12 @@ static void runAction(const Binding* b)
 		case ACT_QUIT: running = false; break;
 		case ACT_SPAWN: if (b->text) spawnCommand(b->text); break;
 		case ACT_GOTO: switchDesktop(b->arg); break;
-		case ACT_SEND: {
-			HWND window = GetAncestor(GetForegroundWindow(), GA_ROOT);
-			if (window && vdCanControl() && vdMoveWindow(window, b->arg)) {
-				scheduleRetile(RETILE_DELAY_MS);
-			}
-			break;
-		}
+		case ACT_SEND: sendWindow(b->arg, config.moveFollows); break;
+		case ACT_SEND_FOLLOW: sendWindow(b->arg, true); break;
+		case ACT_SEND_STAY: sendWindow(b->arg, false); break;
+		case ACT_MASTER_CYCLE: tilingCycleMaster(); break;
+		case ACT_MASTER_GROW: tilingAdjustMaster(5); break;
+		case ACT_MASTER_SHRINK: tilingAdjustMaster(-5); break;
 		case ACT_WORKSPACE_NEXT:
 		case ACT_WORKSPACE_PREV: {
 			int count = vdCount(), current = vdCurrent();
@@ -239,11 +352,25 @@ static void onForeground(HWND window)
 	}
 
 	if (current != lastDesktop) {
+		// The desktop changed without us (Windows shortcut, taskbar, touchpad gesture).
 		lastDesktop = current;
 		refreshTray();
-		pendingAutoFocus = true;
+		logWrite("switch: workspace %d (external)", current);
+		requestWorkspaceFocus(current, false);
 		scheduleRetile(RETILE_DELAY_MS * 2);
-	} else if (tilingModeActive()) {
+		return;
+	}
+
+	// Remember what has focus on this workspace, so coming back restores it.
+	HWND root = GetAncestor(window, GA_ROOT);
+	if (root && current > 0 && vdWindowOnCurrent(root) && settled) {
+		int desktop = vdWindowDesktop(root);
+		if (desktop == 0 || desktop == current) {
+			tilingRememberFocus(root, current);
+		}
+	}
+
+	if (tilingModeActive()) {
 		scheduleRetile(RETILE_DELAY_MS / 2);
 	}
 }
@@ -338,6 +465,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR commandLine, i
 		if (msg.message == WM_LWM_ACTION || msg.message == WM_HOTKEY) {
 			const Binding* binding = keyboardLookup(msg.wParam);
 			if (binding && !keyboardIsDuplicate(msg.wParam)) runAction(binding);
+		} else if (msg.message == WM_TIMER && msg.hwnd == NULL && focusTimer && msg.wParam == focusTimer) {
+			KillTimer(NULL, focusTimer);
+			focusTimer = 0;
+			attemptWorkspaceFocus();
 		} else if (msg.message == WM_TIMER && msg.hwnd == NULL && altdragHandleTimer(msg.wParam)) {
 			// a throttled drag update was applied
 		} else if (msg.message == WM_TIMER && msg.hwnd == NULL && msg.wParam == hookRefreshTimer) {

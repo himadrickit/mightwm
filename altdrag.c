@@ -4,6 +4,8 @@
 #include "tiling.h"
 #include "vdesktop.h"
 #include <dwmapi.h>
+#include <string.h>
+#include <wchar.h>
 
 #ifndef DWMWA_EXTENDED_FRAME_BOUNDS
 #define DWMWA_EXTENDED_FRAME_BOUNDS 9
@@ -63,7 +65,7 @@ static UINT modifierOf(DWORD vk)
 static void disguiseRelease(void)
 {
 	INPUT input[2];
-	ZeroMemory(input, sizeof input);
+	memset(input, 0, sizeof input);
 
 	input[0].type = INPUT_KEYBOARD;
 	input[0].ki.wVk = VK_CONTROL;

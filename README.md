@@ -18,6 +18,9 @@ workspaces and configuration of [nir9/lightwm](https://github.com/nir9/lightwm).
   divider changes the master width).
 - **Tray icon** (right-click: toggle tiling, retile, reload config, open config, quit; double-click toggles tiling). On Windows 11 it is promoted out of the overflow menu automatically.
 - **Floating mode:** `alt+t` pops the focused window out of the layout to a centered floating size (`float-size`, default 70%) on top; press again to tile it back into its slot.
+- **Per-workspace focus:** every workspace remembers which window had focus; `alt+N` restores it (falling back to the master window). Switches in quick bursts only focus the workspace you end on, and each focus is verified and retried, so Windows no longer flashes taskbar buttons. With `debug-log true` the tray menu gets "Open debug log" and the log lists the focus table per workspace.
+- **`movetype`:** `alt+shift+N` either keeps you here (`"stay"`) or goes to the workspace with the window (`"follow"`). `send-follow` / `send-stay` binds override it per key.
+- **`autowidth`:** the main (left) window takes this % of the screen when there are other windows; alone it fills everything. Give several (`autowidth 65 60 70`): the first is the start, `alt+w` cycles through them. `alt+=` / `alt+-` grow and shrink it live, and dragging the divider with `alt`+right-drag does too.
 - **Auto-focus:** after a window closes or you switch desktops, focus goes to the master (left) window, or to the only window. `auto-focus "lost"` (default) does this only when nothing is focused, `"always"` every time, `"off"` never. `alt+g` focuses the master on demand.
 - **KDL config** with variables, custom keybinds and `spawn` commands.
 
@@ -54,8 +57,8 @@ written on first run. Reload with `$mod+shift+r`.
 
 ```kdl
 vars { mod "alt"; term "wt.exe" }
-general { gap 6; master-width 50; layout "master-stack"; float "Calculator" "mpv.exe" }
-workspaces { follow-focus true; block-windows-shortcuts true; backend "auto"; goto "$mod+{1-9}"; send "$mod+shift+{1-9}" }
+general { gap 6; autowidth 65 60 70; layout "master-stack"; float "Calculator" "mpv.exe" }
+workspaces { follow-focus true; movetype "stay"; block-windows-shortcuts true; backend "auto"; goto "$mod+{1-9}"; send "$mod+shift+{1-9}" }
 altdrag { enabled true; mod "$mod"; move "left"; resize "right" }
 binds {
     $mod+Return { spawn "$term" }

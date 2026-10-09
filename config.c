@@ -17,7 +17,7 @@ static const char* const defaultConfig =
 "\n"
 "general {\n"
 "    gap 6                  // pixels between windows and around the screen edge\n"
-"    master-width 50        // percent of the width the first window takes\n"
+"    autowidth 65 60 70     // main (left) window width in %: starts at the first, $mod+w cycles through them\n"
 "    layout \"master-stack\"  // \"master-stack\", \"grid\" or \"columns\"\n"
 "    float-size 70          // size (% of the screen) a window gets when you float it with $mod+t\n"
 "    warp-cursor false      // move the mouse to the window you focus by keyboard\n"
@@ -33,6 +33,7 @@ static const char* const defaultConfig =
 "    follow-focus true      // focusing a window on another desktop switches to it\n"
 "    block-windows-shortcuts true  // turn off Windows' own ctrl+win+d / ctrl+win+left/right\n"
 "    backend \"auto\"        // \"auto\" (DLL if present, else built-in), \"dll\" or \"builtin\"\n"
+"    movetype \"stay\"       // moving a window to another workspace: \"follow\" it there, or \"stay\" here\n"
 "    goto \"$mod+{1-9}\"\n"
 "    send \"$mod+shift+{1-9}\"\n"
 "}\n"
@@ -66,6 +67,10 @@ static const char* const defaultConfig =
 "    $mod+shift+q { close-window }\n"
 "    $mod+shift+r { reload-config }\n"
 "    $mod+shift+e { quit }\n"
+"\n"
+"    $mod+w { master-cycle }\n"
+"    $mod+equal { master-grow }\n"
+"    $mod+minus { master-shrink }\n"
 "\n"
 "    $mod+bracketleft  { workspace-prev }\n"
 "    $mod+bracketright { workspace-next }\n"
@@ -289,7 +294,8 @@ static const struct { const char* name; Action action; } actionNames[] = {
 	{ "toggle-floating", ACT_TOGGLE_FLOAT }, { "monocle", ACT_MONOCLE }, { "toggle-monocle", ACT_MONOCLE },
 	{ "fullscreen", ACT_FULLSCREEN }, { "retile", ACT_RETILE }, { "toggle-tiling", ACT_TOGGLE_TILING },
 	{ "reload-config", ACT_RELOAD }, { "quit", ACT_QUIT }, { "spawn", ACT_SPAWN },
-	{ "goto", ACT_GOTO }, { "send", ACT_SEND },
+	{ "goto", ACT_GOTO }, { "send", ACT_SEND }, { "send-follow", ACT_SEND_FOLLOW }, { "send-stay", ACT_SEND_STAY },
+	{ "master-cycle", ACT_MASTER_CYCLE }, { "master-grow", ACT_MASTER_GROW }, { "master-shrink", ACT_MASTER_SHRINK },
 	{ "workspace-next", ACT_WORKSPACE_NEXT }, { "workspace-prev", ACT_WORKSPACE_PREV },
 	{ "switch-next-workspace", ACT_WORKSPACE_NEXT }, { "switch-previous-workspace", ACT_WORKSPACE_PREV }
 };
@@ -359,9 +365,14 @@ static void parseGeneral(Ctx* ctx, const KdlNode* node)
 
 		if (!strcmp(n->name, "gap") && value) {
 			cfg->gap = atoi(value) < 0 ? 0 : atoi(value);
-		} else if (!strcmp(n->name, "master-width") && value) {
-			int percent = atoi(value);
-			cfg->masterPercent = percent < 10 ? 10 : percent > 90 ? 90 : percent;
+		} else if ((!strcmp(n->name, "master-width") || !strcmp(n->name, "autowidth") || !strcmp(n->name, "auto-width")) && value) {
+			// One or more widths: the first is the starting width, `master-cycle` steps through the rest.
+			cfg->widthPresetCount = 0;
+			for (int a = 0; a < n->argc && cfg->widthPresetCount < MAX_WIDTH_PRESETS; a++) {
+				int percent = atoi(n->args[a]);
+				cfg->widthPresets[cfg->widthPresetCount++] = percent < 10 ? 10 : percent > 90 ? 90 : percent;
+			}
+			cfg->masterPercent = cfg->widthPresets[0];
 		} else if (!strcmp(n->name, "layout") && value) {
 			if (!strcmp(value, "master-stack")) cfg->layout = LAYOUT_MASTER_STACK;
 			else if (!strcmp(value, "grid")) cfg->layout = LAYOUT_GRID;
@@ -478,6 +489,15 @@ static void parseWorkspaces(Ctx* ctx, const KdlNode* node)
 
 		if (!strcmp(n->name, "follow-focus")) {
 			ctx->cfg->followFocus = truthy(value);
+		} else if (!strcmp(n->name, "movetype") || !strcmp(n->name, "move-type")) {
+			if (value && (!_stricmp(value, "follow") || !_stricmp(value, "follows"))) ctx->cfg->moveFollows = true;
+			else if (value && (!_stricmp(value, "stay") || !_stricmp(value, "not-follow") || !_stricmp(value, "not follow") ||
+				!_stricmp(value, "nofollow") || !_stricmp(value, "no-follow"))) ctx->cfg->moveFollows = false;
+			else note(ctx, "workspaces: movetype must be \"follow\" or \"stay\"");
+		} else if (!strcmp(n->name, "send-follow") && value) {
+			addRangeBindings(ctx, value, ACT_SEND_FOLLOW);
+		} else if (!strcmp(n->name, "send-stay") && value) {
+			addRangeBindings(ctx, value, ACT_SEND_STAY);
 		} else if (!strcmp(n->name, "block-windows-shortcuts")) {
 			ctx->cfg->blockWindowsDesktopKeys = truthy(value);
 		} else if (!strcmp(n->name, "backend") && value) {
@@ -540,7 +560,7 @@ static void parseBinds(Ctx* ctx, const KdlNode* node)
 				free(piece);
 			}
 			text = copyText(joined);
-		} else if (action == ACT_GOTO || action == ACT_SEND) {
+		} else if (action == ACT_GOTO || action == ACT_SEND || action == ACT_SEND_FOLLOW || action == ACT_SEND_STAY) {
 			arg = actionNode->argc ? atoi(actionNode->args[0]) : 0;
 			if (arg < 1) {
 				note(ctx, "binds: \"%s\": %s needs a desktop number", combo, actionNode->name);
@@ -576,11 +596,16 @@ static void setDefaults(Config* cfg)
 {
 	memset(cfg, 0, sizeof *cfg);
 	cfg->gap = 6;
-	cfg->masterPercent = 50;
+	cfg->masterPercent = 65;
+	cfg->widthPresets[0] = 65;
+	cfg->widthPresets[1] = 60;
+	cfg->widthPresets[2] = 70;
+	cfg->widthPresetCount = 3;
 	cfg->floatPercent = 70;
 	cfg->autoFocus = AUTOFOCUS_LOST;
 	cfg->layout = LAYOUT_MASTER_STACK;
 	cfg->followFocus = true;
+	cfg->moveFollows = false;
 	cfg->blockWindowsDesktopKeys = true;
 	cfg->desktopBackend = 0;
 	cfg->altdragEnabled = true;

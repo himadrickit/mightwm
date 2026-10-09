@@ -12,13 +12,14 @@ typedef enum {
 	ACT_CLOSE, ACT_TOGGLE_FLOAT, ACT_MONOCLE, ACT_FULLSCREEN,
 	ACT_RETILE, ACT_TOGGLE_TILING, ACT_RELOAD, ACT_QUIT,
 	ACT_FOCUS_MASTER,
-	ACT_SPAWN, ACT_GOTO, ACT_SEND, ACT_WORKSPACE_NEXT, ACT_WORKSPACE_PREV
+	ACT_SPAWN, ACT_GOTO, ACT_SEND, ACT_SEND_FOLLOW, ACT_SEND_STAY, ACT_MASTER_GROW, ACT_MASTER_SHRINK, ACT_MASTER_CYCLE, ACT_WORKSPACE_NEXT, ACT_WORKSPACE_PREV
 } Action;
 
 enum { BTN_NONE = 0, BTN_LEFT, BTN_RIGHT, BTN_MIDDLE };
 enum { AUTOFOCUS_OFF = 0, AUTOFOCUS_LOST, AUTOFOCUS_ALWAYS };
 
 #define MAX_RULES 64
+#define MAX_WIDTH_PRESETS 8
 
 typedef struct {
 	UINT mods;
@@ -31,12 +32,15 @@ typedef struct {
 typedef struct {
 	int gap;
 	int masterPercent;
+	int widthPresets[MAX_WIDTH_PRESETS];
+	int widthPresetCount;
 	LayoutKind layout;
 	bool warpCursor;
 	bool debugLog;
 	int autoFocus;
 	int floatPercent;
 	bool followFocus;
+	bool moveFollows;
 	bool blockWindowsDesktopKeys;
 	int desktopBackend;
 

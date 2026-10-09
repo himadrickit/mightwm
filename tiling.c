@@ -6,6 +6,8 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <wchar.h>
+#include <stdio.h>
+#include <string.h>
 
 #ifndef DWMWA_CLOAKED
 #define DWMWA_CLOAKED 14
@@ -595,6 +597,7 @@ static void focusWindow(HWND window)
 	if (IsIconic(window)) ShowWindow(window, SW_RESTORE);
 
 	forceForeground(window);
+	tilingClearAlert(window);
 
 	if (config && config->warpCursor) {
 		RECT frame;
@@ -617,6 +620,107 @@ void tilingFocusRelative(int step)
 	focusWindow(list[next]);
 }
 
+
+
+// ---- Per-workspace focus memory -------------------------------------------------------------
+
+#define MAX_DESKTOP_SLOTS 64
+static HWND focusMemory[MAX_DESKTOP_SLOTS + 1];
+
+void tilingDescribe(HWND window, char* out, size_t size)
+{
+	wchar_t className[64] = L"?";
+	wchar_t title[48] = L"";
+	char className8[128] = "?", title8[128] = "";
+
+	if (window && IsWindow(window)) {
+		GetClassNameW(window, className, 64);
+		GetWindowTextW(window, title, 48);
+	}
+
+	WideCharToMultiByte(CP_UTF8, 0, className, -1, className8, sizeof className8, NULL, NULL);
+	WideCharToMultiByte(CP_UTF8, 0, title, -1, title8, sizeof title8, NULL, NULL);
+	snprintf(out, size, "%p [%s] \"%s\"", (void*)window, className8, title8);
+}
+
+void tilingRememberFocus(HWND window, int desktop)
+{
+	if (desktop < 1 || desktop > MAX_DESKTOP_SLOTS || !window) return;
+	if (indexOf(order, orderCount, window) < 0) return;   // only real application windows
+
+	if (focusMemory[desktop] != window) {
+		focusMemory[desktop] = window;
+
+		if (logEnabled()) {
+			char text[320];
+			tilingDescribe(window, text, sizeof text);
+			logWrite("focus memory: workspace %d -> %s", desktop, text);
+		}
+	}
+}
+
+// A window can only be focused when it exists, is shown and lives on the desktop we are on.
+static bool canFocusNow(HWND window)
+{
+	return window && IsWindow(window) && IsWindowVisible(window) && !IsIconic(window) && vdWindowOnCurrent(window);
+}
+
+// What should have focus on this workspace: the window that had it last time, otherwise the master.
+HWND tilingWorkspaceFocusTarget(int desktop)
+{
+	if (desktop >= 1 && desktop <= MAX_DESKTOP_SLOTS && canFocusNow(focusMemory[desktop])) {
+		return focusMemory[desktop];
+	}
+
+	HWND master = NULL;
+	for (int i = 0; i < orderCount && !master; i++) {
+		if (canFocusNow(order[i]) && indexOf(floated, floatedCount, order[i]) < 0) master = order[i];
+	}
+	return master;
+}
+
+bool tilingIsForeground(HWND window)
+{
+	return GetAncestor(GetForegroundWindow(), GA_ROOT) == window;
+}
+
+void tilingFocusWindow(HWND window)
+{
+	if (canFocusNow(window)) {
+		focusWindow(window);
+	}
+}
+
+void tilingClearAlert(HWND window)
+{
+	FLASHWINFO flash;
+	memset(&flash, 0, sizeof flash);
+	flash.cbSize = sizeof flash;
+	flash.hwnd = window;
+	flash.dwFlags = FLASHW_STOP;
+	FlashWindowEx(&flash);
+}
+
+void tilingLogFocusTable(void)
+{
+	if (!logEnabled()) return;
+
+	int current = vdCurrent();
+	logWrite("focus table (foreground now: see below):");
+
+	for (int d = 1; d <= MAX_DESKTOP_SLOTS; d++) {
+		if (!focusMemory[d]) continue;
+
+		char text[320];
+		tilingDescribe(focusMemory[d], text, sizeof text);
+		logWrite("  workspace %d%s: %s%s", d, d == current ? " (current)" : "", text,
+			IsWindow(focusMemory[d]) ? "" : "  [window gone]");
+	}
+
+	char text[320];
+	tilingDescribe(GetAncestor(GetForegroundWindow(), GA_ROOT), text, sizeof text);
+	logWrite("  foreground: %s", text);
+}
 
 // The master window is the first tiled window of the current desktop (the left one in
 // master-stack); with a single window, that window. Found straight from the known window
@@ -853,6 +957,31 @@ void tilingToggleFullscreen(void)
 	mode = MODE_FULLSCREEN;
 	modeTarget = target;
 	applyFullscreen(target, info.rcMonitor);
+}
+
+// Grows or shrinks the main window's share of the screen (10-90%) until the config is reloaded.
+void tilingAdjustMaster(int deltaPercent)
+{
+	int updated = masterPercent + deltaPercent;
+	masterPercent = updated < 10 ? 10 : updated > 90 ? 90 : updated;
+	logWrite("master width: %d%%", masterPercent);
+	tilingRetile();
+}
+
+// Steps through the `autowidth` presets (for example 65 -> 60 -> 70 -> 65). From a width that is
+// not a preset (after growing/shrinking by hand) it goes back to the first preset.
+void tilingCycleMaster(void)
+{
+	if (!config || config->widthPresetCount < 1) return;
+
+	int index = -1;
+	for (int i = 0; i < config->widthPresetCount; i++) {
+		if (config->widthPresets[i] == masterPercent) index = i;
+	}
+
+	masterPercent = config->widthPresets[(index + 1) % config->widthPresetCount];
+	logWrite("master width preset: %d%%", masterPercent);
+	tilingRetile();
 }
 
 void tilingToggleEnabled(void)
